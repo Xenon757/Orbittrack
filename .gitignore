@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+.pytest_cache/
+
+# Cached TLE downloads (fresh data only; never commit)
+cache/
+*.tle
+!tests/fixtures/*.tle
+
+# Generated maps
+*.html
+
+# macOS
+.DS_Store
