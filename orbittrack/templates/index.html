@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OrbitTrack</title>
+  <style>
+    :root {
+      --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #5d6779; --border: #dde1e7;
+      --accent: #3b6fb6; --pass: #e8590c; --ok: #2b8a3e; --bad: #c92a2a;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #12151b; --panel: #1b2029; --text: #e6e9ef; --muted: #9aa3b2; --border: #2c3340; --accent: #7aa7e6; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { margin: 0 0 4px; font-size: 26px; }
+    .subtitle { margin: 0 0 20px; color: var(--muted); }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    form { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; align-items: end; }
+    label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+    input, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; width: 100%; }
+    .actions { display: flex; gap: 8px; }
+    button { font: inherit; border-radius: 6px; padding: 8px 14px; cursor: pointer; border: 1px solid var(--accent); }
+    button.primary { background: var(--accent); color: #fff; }
+    button.secondary { background: transparent; color: var(--accent); }
+    .error { border-color: var(--bad); color: var(--bad); }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+    .stat .label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+    .stat .value { font-size: 18px; font-weight: 600; }
+    .stat .detail { font-size: 13px; color: var(--muted); }
+    .visible { color: var(--ok); }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+    td.num, th.num { text-align: right; }
+    iframe { width: 100%; height: 520px; border: 1px solid var(--border); border-radius: 8px; }
+    .muted { color: var(--muted); font-size: 13px; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>OrbitTrack</h1>
+  <p class="subtitle">Satellite pass predictions from fresh CelesTrak orbital elements (SGP4).</p>
+
+  <section class="panel">
+    <form method="get" action="/">
+      <label>Satellite (name or NORAD ID)
+        <input name="sat" value="{{ params.sat }}" list="satellite-names" required maxlength="60">
+        <datalist id="satellite-names">
+          {% for name in satellite_names %}<option value="{{ name }}">{% endfor %}
+        </datalist>
+      </label>
+      <label>CelesTrak group
+        <select name="group">
+          {% for value, label in groups.items() %}
+          <option value="{{ value }}" {% if value == params.group %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Station name <input name="station" value="{{ params.station }}" required maxlength="60"></label>
+      <label>Latitude (°N) <input name="lat" id="lat" type="number" step="any" min="-90" max="90" value="{{ params.lat }}" required></label>
+      <label>Longitude (°E) <input name="lon" id="lon" type="number" step="any" min="-180" max="180" value="{{ params.lon }}" required></label>
+      <label>Elevation (m) <input name="elev" type="number" step="any" min="-500" max="9000" value="{{ params.elev }}"></label>
+      <label>Time zone <input name="tz" id="tz" value="{{ params.tz }}" required></label>
+      <label>Hours ahead <input name="hours" type="number" step="any" min="0.1" max="{{ max_hours }}" value="{{ params.hours }}"></label>
+      <label>Elevation mask (°) <input name="min_elevation" type="number" step="any" min="0" max="89" value="{{ params.min_elevation }}"></label>
+      <div class="actions">
+        <button class="primary" type="submit">Predict</button>
+        <button class="secondary" type="button" id="locate">Use my location</button>
+      </div>
+    </form>
+  </section>
+
+  {% if error %}
+  <section class="panel error">{{ error }}</section>
+  {% endif %}
+
+  {% if result %}
+  <section class="panel stats">
+    <div class="stat">
+      <div class="label">Satellite</div>
+      <div class="value">{{ result.name }}</div>
+      <div class="detail">NORAD {{ result.norad_id }} · TLE {{ result.tle_age }} old</div>
+    </div>
+    <div class="stat">
+      <div class="label">Right now</div>
+      <div class="value {% if result.visible %}visible{% endif %}">{{ result.altitude }} elevation</div>
+      <div class="detail">{{ result.status }} · azimuth {{ result.azimuth }} · {{ result.range_km }} km away</div>
+    </div>
+    <div class="stat">
+      <div class="label">Over</div>
+      <div class="value">{{ result.sub_point }}</div>
+      <div class="detail">{{ result.height_km }} km above Earth</div>
+    </div>
+    <div class="stat">
+      <div class="label">Next pass</div>
+      {% if result.next_pass %}
+      <div class="value">{{ result.next_pass.rise }}</div>
+      <div class="detail">in {{ result.next_pass.until }} · max {{ result.next_pass.max_el }} · {{ result.next_pass.duration }}</div>
+      {% else %}
+      <div class="value">None in window</div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <p class="muted" style="margin-top:0">Passes above {{ params.min_elevation }}° over {{ params.station }}
+      between {{ result.window_start }} and {{ result.window_end }} ({{ params.tz }}).</p>
+    {% if result.passes %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th class="num">#</th><th>Date</th><th>Rise</th><th>Peak</th><th>Set</th>
+          <th class="num">Max el</th><th>Direction</th><th class="num">Duration</th>
+        </tr></thead>
+        <tbody>
+        {% for row in result.passes %}
+          <tr>
+            <td class="num">{{ loop.index }}</td><td>{{ row.date }}</td><td>{{ row.rise }}</td><td>{{ row.peak }}</td>
+            <td>{{ row.set }}</td><td class="num">{{ row.max_el }}</td><td>{{ row.direction }}</td><td class="num">{{ row.duration }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p>No complete passes above the mask in this window.</p>
+    {% endif %}
+  </section>
+
+  <iframe src="/map?{{ map_query }}" title="Ground track map"></iframe>
+  <p class="muted">Same data as JSON: <a href="/api/passes?{{ map_query }}">/api/passes</a> ·
+    API docs: <a href="/docs">/docs</a></p>
+  {% endif %}
+</main>
+<script>
+  // Fill in the visitor's coordinates and time zone from the browser (only when they click).
+  document.getElementById("locate").addEventListener("click", () => {
+    document.getElementById("tz").value = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(position => {
+      document.getElementById("lat").value = position.coords.latitude.toFixed(4);
+      document.getElementById("lon").value = position.coords.longitude.toFixed(4);
+      document.querySelector("input[name=station]").value = "My location";
+    });
+  });
+</script>
+</body>
+</html>

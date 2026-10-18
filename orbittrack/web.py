@@ -8,16 +8,21 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Annotated, Literal, get_args
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 from skyfield.api import EarthSatellite, load
 from skyfield.timelib import Time
 
+from orbittrack.mapview import build_map
 from orbittrack.observe import LookAngles, SubPoint, look_angles, sub_point
-from orbittrack.passes import Pass, find_passes
+from orbittrack.passes import Pass, compass_direction, find_passes
 from orbittrack.station import WEST_LAFAYETTE, GroundStation
 from orbittrack.tle import fetch_tle_file, load_satellites, lookup_satellite, tle_age_days
 
@@ -39,6 +44,9 @@ MAX_HOURS = 72  # each request does real orbit math; cap the work one visitor ca
 
 app = FastAPI(title="OrbitTrack", description="Satellite pass predictions for a ground station.")
 ts = load.timescale()
+templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+
+DOWNLOAD_FAILED = "Couldn't download orbital data from CelesTrak right now, and nothing is cached. Try again shortly."
 
 
 # --- TLE data shared by every visitor ---
@@ -184,12 +192,115 @@ def prediction_json(p: Prediction) -> dict:
     }
 
 
+# --- formatting for the HTML page (times shown in the station's time zone) ---
+
+def format_duration(span: timedelta) -> str:
+    """"6m 14s" for LEO passes; "6h 33m" for the hours-long passes of high orbits like GPS."""
+    if span >= timedelta(hours=1):
+        return hours_and_minutes(span)
+    minutes, seconds = divmod(round(span.total_seconds()), 60)
+    return f"{minutes}m {seconds:02d}s"
+
+
+def hours_and_minutes(span: timedelta) -> str:
+    hours, minutes = divmod(round(span.total_seconds() / 60), 60)
+    return f"{hours}h {minutes:02d}m"
+
+
+def page_result(p: Prediction) -> dict:
+    """Everything the template shows, already formatted, so the template stays simple."""
+    zone = p.station.local_zone()
+    start = p.start.utc_datetime()
+
+    def local(moment: datetime, pattern: str = "%Y-%m-%d %H:%M %Z") -> str:
+        return moment.astimezone(zone).strftime(pattern)
+
+    if p.current.altitude_deg < 0:
+        status = "below the horizon"
+    elif p.current.altitude_deg < p.station.min_elevation_deg:
+        status = "above the horizon, below the mask"
+    else:
+        status = "visible above the mask"
+
+    next_pass = None
+    if p.passes:
+        first = p.passes[0]
+        next_pass = {
+            "rise": local(first.rise),
+            "until": hours_and_minutes(first.rise - start),
+            "max_el": f"{first.max_elevation_deg:.1f}°",
+            "duration": format_duration(first.duration),
+        }
+
+    return {
+        "name": p.satellite.name.strip(),
+        "norad_id": p.satellite.model.satnum,
+        "tle_age": f"{tle_age_days(p.satellite, p.start):.2f} days",
+        "altitude": f"{p.current.altitude_deg:.1f}°",
+        "azimuth": f"{p.current.azimuth_deg:.0f}° ({compass_direction(p.current.azimuth_deg)})",
+        "range_km": f"{p.current.range_km:,.0f}",
+        "visible": p.current.altitude_deg >= p.station.min_elevation_deg,
+        "status": status,
+        "sub_point": f"{p.below.latitude_deg:.2f}°, {p.below.longitude_deg:.2f}°",
+        "height_km": f"{p.below.height_km:.0f}",
+        "next_pass": next_pass,
+        "window_start": local(start),
+        "window_end": local(p.end.utc_datetime()),
+        "passes": [
+            {
+                "date": local(x.rise, "%Y-%m-%d"),
+                "rise": local(x.rise, "%H:%M:%S"),
+                "peak": local(x.culmination, "%H:%M:%S"),
+                "set": local(x.set, "%H:%M:%S"),
+                "max_el": f"{x.max_elevation_deg:.1f}°",
+                "direction": f"{compass_direction(x.rise_azimuth_deg)} → {compass_direction(x.set_azimuth_deg)}",
+                "duration": format_duration(x.duration),
+            }
+            for x in p.passes
+        ],
+    }
+
+
 # --- routes ---
+
+@app.get("/", response_class=HTMLResponse)
+def index(request: Request, params: Params, load_satellites_for: GroupLoader) -> HTMLResponse:
+    """The form, plus results for whatever it was submitted with (ISS over West Lafayette by default)."""
+    result, error, names, map_query, status = None, None, [], "", 200
+    try:
+        names = sorted(s.name.strip() for s in load_satellites_for(params.group))
+        prediction = predict(params, load_satellites_for)
+        result = page_result(prediction)
+        # Pin the map and JSON links to the same start time, so they match the table exactly.
+        fixed_start = prediction.start.utc_datetime().isoformat()
+        map_query = urlencode({**params.model_dump(exclude_none=True), "start": fixed_start})
+    except LookupError as lookup_error:
+        error, status = str(lookup_error), 404
+    except OSError:
+        error, status = DOWNLOAD_FAILED, 503
+
+    context = {"params": params, "groups": GROUP_LABELS, "max_hours": MAX_HOURS, "satellite_names": names,
+               "result": result, "error": error, "map_query": map_query}
+    return templates.TemplateResponse(request, "index.html", context, status_code=status)
+
+
+@app.get("/map", response_class=HTMLResponse)
+def map_page(params: Params, load_satellites_for: GroupLoader) -> HTMLResponse:
+    """The interactive ground-track map for the same parameters (embedded by the main page)."""
+    p = _predict_or_http_error(params, load_satellites_for)
+    return HTMLResponse(build_map(p.satellite, p.station, p.start, p.end, p.passes).get_root().render())
+
 
 @app.get("/api/passes")
 def api_passes(params: Params, load_satellites_for: GroupLoader) -> dict:
     """Current position and every pass above the mask in the window, as JSON."""
+    return prediction_json(_predict_or_http_error(params, load_satellites_for))
+
+
+def _predict_or_http_error(params: PassQuery, load_satellites_for: Callable[[str], list[EarthSatellite]]) -> Prediction:
     try:
-        return prediction_json(predict(params, load_satellites_for))
+        return predict(params, load_satellites_for)
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error))
+    except OSError:
+        raise HTTPException(status_code=503, detail=DOWNLOAD_FAILED)
