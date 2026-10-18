@@ -20,8 +20,11 @@ ground track on an interactive map, and serve predictions through a small web ap
   satellite at a time), and reports the next scheduled contact.
 - **Ground-track map**: an HTML map (folium / Leaflet) showing the ground track, the station's
   coverage circle, each predicted pass, and the satellite's position at the start time.
-- **Web app**: a FastAPI site with a prediction form, the pass table, the embedded map, and the
-  same data as JSON at `/api/passes` (interactive API docs at `/docs`).
+- **Web app**: a FastAPI site with a prediction form, the pass table, a polar sky plot of each
+  pass's path, the embedded map, and the same data as JSON at `/api/passes` (interactive API docs
+  at `/docs`). While the current time is inside the search window, the page shows the
+  satellite's *predicted* position updating every second: countdown, elevation / azimuth /
+  range, a dot on the sky plot during passes, and the marker on the map.
 - **Polite data handling**: TLE downloads are cached locally for 6 hours; if a download fails,
   a stale cached copy is used with a warning.
 
@@ -93,6 +96,14 @@ set azimuths, and duration. Because the app is meant to face the public:
   and each file is parsed once and reused until it changes.
 - An unknown satellite returns 404 with name suggestions; a failed download with nothing
   cached returns 503.
+- Responses over 1 KB are gzip-compressed.
+
+The live display doesn't run SGP4 in the browser. The page carries the server's SGP4 samples
+every 30 s across the window, and the browser interpolates between them: the satellite's
+east / north / up position relative to the station (smooth even through the zenith, where
+azimuth can swing 180° in seconds), converted to elevation / azimuth / range. Halfway between
+samples, the worst case, the pointing error stays under 0.1° (a test checks this; it measured
+0.06° for the fixture day). It shows predictions from orbital elements, not live telemetry.
 
 ### Deploying
 
@@ -209,7 +220,7 @@ Key details:
 pytest
 ```
 
-115 tests, all offline. They use a real CelesTrak TLE file from 2026-10-18 checked into
+123 tests, all offline. They use a real CelesTrak TLE file from 2026-10-18 checked into
 `tests/fixtures/` and fixed start times, so results are deterministic. CLI tests fail if
 anything tries to download, and web tests swap in the fixture through FastAPI's dependency
 overrides. The tests include:
@@ -231,8 +242,9 @@ overrides. The tests include:
 - **Web app**: the API returns the same passes as the core code; the page, map and error pages
   render; bad parameters (including disallowed groups) get 422; visitor input is HTML-escaped;
   an outage gives 503 and is not retried for 5 minutes; the configured TLE source URL is used;
-  the shared cache parses a file once until it changes; and the mirror workflow's group list
-  matches the app's allowed groups.
+  the shared cache parses a file once until it changes; the mirror workflow's group list
+  matches the app's allowed groups; sky plot peaks sit at the right distance from the zenith;
+  live samples match direct SGP4 and interpolate to within 0.1°; and responses are gzipped.
 
 ## Limitations
 
