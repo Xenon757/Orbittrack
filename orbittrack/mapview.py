@@ -1,6 +1,7 @@
 """Draw a satellite's ground track, the station's coverage, and predicted passes on an interactive map."""
 
 import html
+import json
 import statistics
 
 import folium
@@ -34,6 +35,28 @@ MAP_STYLE = f"""
     letter-spacing: 0.1em; text-transform: uppercase; }}
   .ot-title b {{ color: {PASS_COLOR}; }}
 </style>
+"""
+
+
+LIVE_MARKER_JS = """
+window.addEventListener("load", function () {
+  var marker = %(marker)s, live = %(live)s, times = live.times_ms, pts = live.points;
+  function tick() {
+    var now = Date.now();
+    if (now < times[0] || now > times[times.length - 1]) return;
+    var i = 0;
+    while (i < times.length - 2 && times[i + 1] <= now) i++;
+    var f = (now - times[i]) / (times[i + 1] - times[i]), a = pts[i], b = pts[i + 1];
+    var lonB = b[1];
+    if (lonB - a[1] > 180) lonB -= 360;
+    if (lonB - a[1] < -180) lonB += 360;
+    var lon = ((a[1] + (lonB - a[1]) * f + 540) %% 360) - 180;
+    marker.setLatLng([a[0] + (b[0] - a[0]) * f, lon]);
+    marker.setTooltipContent(live.label);
+  }
+  tick();
+  setInterval(tick, 1000);
+});
 """
 
 
@@ -78,10 +101,20 @@ def build_map(
                             color=PASS_COLOR, weight=5, tooltip=label).add_to(fmap)
 
     now = track[0]
-    folium.CircleMarker(
+    marker = folium.CircleMarker(
         [now.latitude_deg, now.longitude_deg], radius=7, color=INK, weight=2.5, fill=True, fill_color=PAPER, fill_opacity=1,
         tooltip=f"{sat_name} at {now.time.astimezone(zone):%Y-%m-%d %H:%M %Z} ({now.height_km:.0f} km up)",
     ).add_to(fmap)
+
+    # While "now" falls inside the window, glide the marker to the predicted position every
+    # second by interpolating between the 30-second track samples computed above.
+    live = {
+        "start_ms": round(track[0].time.timestamp() * 1000),
+        "times_ms": [round(q.time.timestamp() * 1000) for q in track],
+        "points": [[round(q.latitude_deg, 3), round(q.longitude_deg, 3)] for q in track],
+        "label": f"{sat_name} · predicted position now",
+    }
+    fmap.get_root().script.add_child(folium.Element(LIVE_MARKER_JS % {"marker": marker.get_name(), "live": json.dumps(live)}))
 
     title = (f"{sat_name} ground track, {track[0].time.astimezone(zone):%Y-%m-%d %H:%M} to "
              f"{track[-1].time.astimezone(zone):%Y-%m-%d %H:%M %Z} &middot; "
