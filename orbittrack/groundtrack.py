@@ -8,6 +8,7 @@ from skyfield.api import EarthSatellite, wgs84
 from skyfield.timelib import Time
 
 SECONDS_PER_DAY = 86400.0
+EARTH_RADIUS_KM = 6371.0  # mean radius; a sphere is plenty accurate for drawing coverage
 
 
 class TrackPoint(NamedTuple):
@@ -51,3 +52,32 @@ def split_at_antimeridian(points: list[TrackPoint]) -> list[list[TrackPoint]]:
         else:
             segments.append([point])
     return segments
+
+
+def coverage_radius_deg(height_km: float, min_elevation_deg: float) -> float:
+    """How far (as an angle at Earth's center) a satellite can be from the station and still clear the mask.
+
+    Picture the triangle Earth-center / station / satellite. At the station, the angle
+    between "straight up" and the satellite is 90 + elevation; the law of sines then gives
+        central angle = arccos(R * cos(elevation) / (R + h)) - elevation
+    Higher orbits see farther; a higher mask shrinks the circle.
+    """
+    elevation = np.radians(min_elevation_deg)
+    ratio = EARTH_RADIUS_KM * np.cos(elevation) / (EARTH_RADIUS_KM + height_km)
+    return float(np.degrees(np.arccos(ratio) - elevation))
+
+
+def circle_around(latitude_deg: float, longitude_deg: float, radius_deg: float, points: int = 120) -> list[tuple[float, float]]:
+    """(lat, lon) points on a circle of constant great-circle distance around a center.
+
+    This is the "destination point" formula: start at the center, travel `radius_deg` along
+    each compass bearing. Longitudes are left unwrapped (they may pass 180) so the polygon
+    stays a single closed shape on the map.
+    """
+    lat1, lon1, distance = np.radians(latitude_deg), np.radians(longitude_deg), np.radians(radius_deg)
+    bearings = np.linspace(0, 2 * np.pi, points + 1)  # +1 closes the loop
+
+    lat2 = np.arcsin(np.sin(lat1) * np.cos(distance) + np.cos(lat1) * np.sin(distance) * np.cos(bearings))
+    lon2 = lon1 + np.arctan2(np.sin(bearings) * np.sin(distance) * np.cos(lat1),
+                             np.cos(distance) - np.sin(lat1) * np.sin(lat2))
+    return list(zip(np.degrees(lat2).tolist(), np.degrees(lon2).tolist()))
