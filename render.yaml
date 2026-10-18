@@ -11,3 +11,8 @@ services:
     startCommand: uvicorn orbittrack.web:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
     autoDeployTrigger: commit  # redeploy on every push to the connected branch
+    envVars:
+      # Render's network can't reach CelesTrak, so read the GitHub Pages mirror that
+      # .github/workflows/tle-mirror.yml refreshes every 6 hours.
+      - key: ORBITTRACK_TLE_URL
+        value: https://xenon757.github.io/Orbittrack/{group}.tle
