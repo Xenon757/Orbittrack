@@ -150,3 +150,31 @@ def test_load_group_parses_once_until_the_file_changes(tle_path, tmp_path, monke
     os.utime(cached_file, (later, later))
     web.load_group("stations")
     assert len(parses) == 2
+
+
+def test_failed_download_is_not_retried_for_a_while(monkeypatch):
+    attempts = []
+
+    def failing_fetch(group):
+        attempts.append(group)
+        raise OSError("timed out")
+
+    clock = [1000.0]
+    monkeypatch.setattr(web, "fetch_tle_file", failing_fetch)
+    monkeypatch.setattr(web, "_parsed", {})
+    monkeypatch.setattr(web, "_last_failure", {})
+    monkeypatch.setattr(web.time, "monotonic", lambda: clock[0])
+
+    for _ in range(3):  # the first visitor waits on the network; the next two get an instant 503
+        with pytest.raises(OSError, match="timed out"):
+            web.load_group("stations")
+    assert len(attempts) == 1
+
+    clock[0] += web.RETRY_AFTER_SECONDS + 1  # after the back-off, try CelesTrak again
+    with pytest.raises(OSError):
+        web.load_group("stations")
+    assert len(attempts) == 2
+
+
+def test_outage_reason_is_shown(offline_client):
+    assert "(Reason: network down)" in offline_client.get("/api/passes").json()["detail"]

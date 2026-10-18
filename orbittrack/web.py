@@ -4,7 +4,9 @@ Run locally with:
     uvicorn orbittrack.web:app --reload
 """
 
+import logging
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -47,12 +49,18 @@ ts = load.timescale()
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 DOWNLOAD_FAILED = "Couldn't download orbital data from CelesTrak right now, and nothing is cached. Try again shortly."
+log = logging.getLogger("orbittrack.web")
 
 
 # --- TLE data shared by every visitor ---
 
 _cache_lock = threading.Lock()
 _parsed: dict[str, tuple[float, list[EarthSatellite]]] = {}  # group -> (file mtime, satellites)
+_last_failure: dict[str, tuple[float, str]] = {}  # group -> (time.monotonic() of failure, reason)
+
+# After a failed download, wait this long before trying CelesTrak again. Without it, every
+# visitor would sit through the full network timeout and we'd keep retrying a failing server.
+RETRY_AFTER_SECONDS = 300
 
 
 def load_group(group: str) -> list[EarthSatellite]:
@@ -62,7 +70,17 @@ def load_group(group: str) -> list[EarthSatellite]:
     stale, only one request downloads a fresh copy while the others wait and reuse it.
     """
     with _cache_lock:
-        path = fetch_tle_file(group)
+        failed = _last_failure.get(group)
+        if failed and time.monotonic() - failed[0] < RETRY_AFTER_SECONDS:
+            raise OSError(failed[1])
+        try:
+            path = fetch_tle_file(group)
+        except OSError as error:
+            reason = str(error) or type(error).__name__
+            log.warning("TLE download for group %r failed: %s", group, reason)
+            _last_failure[group] = (time.monotonic(), reason)
+            raise
+        _last_failure.pop(group, None)
         modified = path.stat().st_mtime
         if group not in _parsed or _parsed[group][0] != modified:
             _parsed[group] = (modified, load_satellites(path))
@@ -276,8 +294,8 @@ def index(request: Request, params: Params, load_satellites_for: GroupLoader) ->
         map_query = urlencode({**params.model_dump(exclude_none=True), "start": fixed_start})
     except LookupError as lookup_error:
         error, status = str(lookup_error), 404
-    except OSError:
-        error, status = DOWNLOAD_FAILED, 503
+    except OSError as download_error:
+        error, status = f"{DOWNLOAD_FAILED} (Reason: {download_error})", 503
 
     context = {"params": params, "groups": GROUP_LABELS, "max_hours": MAX_HOURS, "satellite_names": names,
                "result": result, "error": error, "map_query": map_query}
@@ -308,5 +326,5 @@ def _predict_or_http_error(params: PassQuery, load_satellites_for: Callable[[str
         return predict(params, load_satellites_for)
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error))
-    except OSError:
-        raise HTTPException(status_code=503, detail=DOWNLOAD_FAILED)
+    except OSError as error:
+        raise HTTPException(status_code=503, detail=f"{DOWNLOAD_FAILED} (Reason: {error})")
