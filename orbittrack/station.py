@@ -1,6 +1,7 @@
 """Ground station definition: where the antenna is and how low it can usefully look."""
 
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo
 
 from skyfield.api import wgs84
 from skyfield.toposlib import GeographicPosition
@@ -15,6 +16,11 @@ class GroundStation:
     # Below ~10 degrees the signal passes through more atmosphere and buildings/trees
     # block the view, so passes lower than this are usually not worth scheduling.
     min_elevation_deg: float = 10.0
+    # IANA zone name, used only to display times; all calculations stay in UTC.
+    timezone: str = "UTC"
+
+    def local_zone(self) -> ZoneInfo:
+        return ZoneInfo(self.timezone)
 
     def position(self) -> GeographicPosition:
         """The station as a point on the WGS84 ellipsoid, which Skyfield uses for topocentric math."""
@@ -27,4 +33,5 @@ WEST_LAFAYETTE = GroundStation(
     latitude_deg=40.4237,
     longitude_deg=-86.9212,
     elevation_m=187.0,
+    timezone="America/Indiana/Indianapolis",
 )
