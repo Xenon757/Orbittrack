@@ -1,0 +1,4 @@
+# Everything needed to run the tests, on top of the app itself.
+-r requirements.txt
+pytest>=8.0
+httpx>=0.27  # used by FastAPI TestClient
