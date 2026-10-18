@@ -59,6 +59,13 @@ def test_window_with_no_passes_says_none(capsys):
     assert run(capsys, "--hours", "1").rstrip().endswith("none")
 
 
+def test_map_option_writes_an_html_file(capsys, tmp_path):
+    map_file = tmp_path / "track.html"
+    out = run(capsys, "--hours", "6", "--map", str(map_file))
+    assert f"Map saved to {map_file.resolve()}" in out
+    assert "ISS (ZARYA)" in map_file.read_text()
+
+
 def test_unknown_satellite_suggests_close_names(capsys):
     with pytest.raises(SystemExit) as exit_info:
         run(capsys, "--sat", "iss")
