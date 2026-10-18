@@ -106,6 +106,33 @@ def test_higher_mask_gives_fewer_and_shorter_passes(iss, passes):
         assert s.duration < matching.duration
 
 
+def test_window_starting_mid_pass_drops_only_that_pass(iss, passes):
+    # 16:23 UTC is in the middle of the 16:20-16:26 UTC pass. End at the same time as the
+    # full window, so the result should be the full list minus that pass and the ones before it.
+    mid_pass_start = ts.utc(2026, 10, 18, 16, 23)
+    later = find_passes(iss, WEST_LAFAYETTE, mid_pass_start, HOURS - (4 + 23 / 60))
+
+    in_progress = next(p for p in passes if p.rise < mid_pass_start.utc_datetime() < p.set)
+    expected = [p for p in passes if p.rise > in_progress.set]
+
+    # Same passes, but not bit-identical: find_events() is accurate to half a second, and a
+    # different window start lands its search slightly differently (we saw ~9 ms).
+    assert len(later) == len(expected)
+    for got, want in zip(later, expected):
+        assert abs(got.rise - want.rise) < timedelta(seconds=0.5)
+        assert abs(got.set - want.set) < timedelta(seconds=0.5)
+
+
+@pytest.mark.parametrize("latitude, sees_iss", [(60.0, True), (80.0, False)])
+def test_iss_is_never_visible_far_beyond_its_inclination(iss, latitude, sees_iss):
+    # The ISS orbit is inclined 51.6 deg, so its ground track never goes past 51.6 N/S.
+    # From ~420 km it's above the horizon out to ~20 deg of arc, so it can't even rise
+    # (0 deg mask) for a station beyond roughly 72 N. 60 N is inside that, 80 N is not.
+    station = replace(WEST_LAFAYETTE, latitude_deg=latitude, min_elevation_deg=0.0)
+    found = find_passes(iss, station, START, hours=72)
+    assert (len(found) > 0) == sees_iss
+
+
 # --- compass labels ---
 
 @pytest.mark.parametrize("azimuth, label", [(0, "N"), (359, "N"), (44, "NE"), (90, "E"), (225, "SW"), (300, "NW")])
