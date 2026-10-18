@@ -5,6 +5,7 @@ Run locally with:
 """
 
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -26,7 +27,7 @@ from orbittrack.mapview import build_map
 from orbittrack.observe import LookAngles, SubPoint, look_angles, sub_point
 from orbittrack.passes import Pass, compass_direction, find_passes
 from orbittrack.station import WEST_LAFAYETTE, GroundStation
-from orbittrack.tle import fetch_tle_file, load_satellites, lookup_satellite, tle_age_days
+from orbittrack.tle import CELESTRAK_URL, fetch_tle_file, load_satellites, lookup_satellite, tle_age_days
 
 # Only these CelesTrak groups can be requested. On a public server the group name ends up in
 # a cache file path and in a request to CelesTrak, so accepting arbitrary text would allow
@@ -48,7 +49,12 @@ app = FastAPI(title="OrbitTrack", description="Satellite pass predictions for a 
 ts = load.timescale()
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
-DOWNLOAD_FAILED = "Couldn't download orbital data from CelesTrak right now, and nothing is cached. Try again shortly."
+DOWNLOAD_FAILED = "Couldn't download orbital data right now, and nothing is cached. Try again shortly."
+
+# Where TLE files come from, as a URL with a {group} placeholder. Defaults to CelesTrak. Some
+# hosting providers' networks can't reach CelesTrak, so a deployment can point this at a
+# mirror (see .github/workflows/tle-mirror.yml), e.g. https://<user>.github.io/<repo>/{group}.tle
+TLE_SOURCE = os.environ.get("ORBITTRACK_TLE_URL", CELESTRAK_URL)
 log = logging.getLogger("orbittrack.web")
 
 
@@ -74,12 +80,12 @@ def load_group(group: str) -> list[EarthSatellite]:
         if failed and time.monotonic() - failed[0] < RETRY_AFTER_SECONDS:
             raise OSError(failed[1])
         try:
-            path = fetch_tle_file(group)
-        except OSError as error:
+            path = fetch_tle_file(group, url_template=TLE_SOURCE)
+        except (OSError, ValueError) as error:  # ValueError: the response wasn't TLE data
             reason = str(error) or type(error).__name__
-            log.warning("TLE download for group %r failed: %s", group, reason)
+            log.warning("TLE download for group %r from %s failed: %s", group, TLE_SOURCE, reason)
             _last_failure[group] = (time.monotonic(), reason)
-            raise
+            raise OSError(reason) from error
         _last_failure.pop(group, None)
         modified = path.stat().st_mtime
         if group not in _parsed or _parsed[group][0] != modified:

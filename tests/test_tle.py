@@ -63,3 +63,44 @@ def test_no_cache_and_no_network_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", no_network)
     with pytest.raises(OSError):
         fetch_tle_file("stations", cache_dir=tmp_path)
+
+
+def test_download_uses_the_given_url_template(tle_path, tmp_path, monkeypatch):
+    requested = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return tle_path.read_bytes()
+
+    def fake_urlopen(request, timeout):
+        requested.append(request.full_url)
+        return FakeResponse()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    path = fetch_tle_file("weather", cache_dir=tmp_path, url_template="https://mirror.example/{group}.tle")
+
+    assert requested == ["https://mirror.example/weather.tle"]
+    assert path.read_bytes() == tle_path.read_bytes()
+
+
+def test_non_tle_response_is_rejected_and_not_cached(tmp_path, monkeypatch):
+    class ErrorPage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b"<html>404 Not Found</html>"
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout: ErrorPage())
+    with pytest.raises(ValueError):
+        fetch_tle_file("stations", cache_dir=tmp_path, url_template="https://mirror.example/{group}.tle")
+    assert not (tmp_path / "stations.tle").exists()

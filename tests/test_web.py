@@ -117,7 +117,7 @@ def test_page_escapes_user_input(client):
 def test_page_explains_an_outage(offline_client):
     response = offline_client.get("/")
     assert response.status_code == 503
-    assert "Couldn&#39;t download orbital data from CelesTrak" in response.text
+    assert "Couldn&#39;t download orbital data right now" in response.text
 
 
 def test_map_route_renders_the_ground_track(client):
@@ -137,7 +137,7 @@ def test_health_check_needs_no_orbital_data(offline_client):
 def test_load_group_parses_once_until_the_file_changes(tle_path, tmp_path, monkeypatch):
     cached_file = tmp_path / "stations.tle"
     shutil.copy(tle_path, cached_file)
-    monkeypatch.setattr(web, "fetch_tle_file", lambda group: cached_file)
+    monkeypatch.setattr(web, "fetch_tle_file", lambda group, url_template: cached_file)
     monkeypatch.setattr(web, "_parsed", {})
     parses = []
     monkeypatch.setattr(web, "load_satellites", lambda path: parses.append(path) or load_satellites(path))
@@ -155,7 +155,7 @@ def test_load_group_parses_once_until_the_file_changes(tle_path, tmp_path, monke
 def test_failed_download_is_not_retried_for_a_while(monkeypatch):
     attempts = []
 
-    def failing_fetch(group):
+    def failing_fetch(group, url_template):
         attempts.append(group)
         raise OSError("timed out")
 
@@ -178,3 +178,25 @@ def test_failed_download_is_not_retried_for_a_while(monkeypatch):
 
 def test_outage_reason_is_shown(offline_client):
     assert "(Reason: network down)" in offline_client.get("/api/passes").json()["detail"]
+
+
+def test_load_group_downloads_from_the_configured_source(tle_path, monkeypatch):
+    # ORBITTRACK_TLE_URL is read into TLE_SOURCE at startup; a deployment uses it to read a mirror.
+    requested = []
+    monkeypatch.setattr(web, "TLE_SOURCE", "https://mirror.example/{group}.tle")
+    monkeypatch.setattr(web, "fetch_tle_file", lambda group, url_template: requested.append(url_template) or tle_path)
+    monkeypatch.setattr(web, "_parsed", {})
+    monkeypatch.setattr(web, "_last_failure", {})
+
+    web.load_group("stations")
+    assert requested == ["https://mirror.example/{group}.tle"]
+
+
+def test_bad_data_from_the_source_is_treated_as_an_outage(monkeypatch):
+    def not_tle(group, url_template):
+        raise ValueError("did not return TLE data")
+    monkeypatch.setattr(web, "fetch_tle_file", not_tle)
+    monkeypatch.setattr(web, "_parsed", {})
+    monkeypatch.setattr(web, "_last_failure", {})
+    with pytest.raises(OSError, match="did not return TLE data"):
+        web.load_group("stations")
