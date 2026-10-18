@@ -3,141 +3,353 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OrbitTrack</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛰️</text></svg>">
+  <title>OrbitTrack · Pass predictions</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23D9381E'/><circle cx='16' cy='16' r='9' fill='none' stroke='white' stroke-width='3'/><circle cx='24' cy='9' r='3' fill='white'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
+    /* Design system: Swiss / mission-ops manual. Paper, ink, one signal red. 8px grid, no radius, no shadow. */
     :root {
-      --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #5d6779; --border: #dde1e7;
-      --accent: #3b6fb6; --pass: #e8590c; --ok: #2b8a3e; --bad: #c92a2a;
+      --paper: #F2F0EB;
+      --ink: #141414;
+      --graphite: #6B6862;
+      --rule: #CBC6BC;
+      --field: #E8E5DE;
+      --signal: #D9381E;
+      --on-signal: #FFFFFF;
+      --grid: 8px;
+      --sans: "Archivo", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
     }
     @media (prefers-color-scheme: dark) {
-      :root { --bg: #12151b; --panel: #1b2029; --text: #e6e9ef; --muted: #9aa3b2; --border: #2c3340; --accent: #7aa7e6; }
+      :root { --paper: #121211; --ink: #ECE9E2; --graphite: #9A968D; --rule: #34322E; --field: #1C1B19; }
     }
     * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-    main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
-    h1 { margin: 0 0 4px; font-size: 26px; }
-    .subtitle { margin: 0 0 20px; color: var(--muted); }
-    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
-    form { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; align-items: end; }
-    label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
-    input, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; width: 100%; }
-    .actions { display: flex; gap: 8px; }
-    button { font: inherit; border-radius: 6px; padding: 8px 14px; cursor: pointer; border: 1px solid var(--accent); }
-    button.primary { background: var(--accent); color: #fff; }
-    button.secondary { background: transparent; color: var(--accent); }
-    .error { border-color: var(--bad); color: var(--bad); }
-    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
-    .stat .label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
-    .stat .value { font-size: 18px; font-weight: 600; }
-    .stat .detail { font-size: 13px; color: var(--muted); }
-    .visible { color: var(--ok); }
+    html { background: var(--paper); }
+    body {
+      margin: 0; color: var(--ink); background: var(--paper);
+      font: 400 16px/1.5 var(--sans); font-variant-numeric: tabular-nums;
+      -webkit-font-smoothing: antialiased;
+    }
+    .sheet { max-width: 1240px; margin: 0 auto; padding: calc(var(--grid) * 4) clamp(16px, 4vw, 48px) calc(var(--grid) * 8); }
+    a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    a:hover { color: var(--signal); }
+    .mono { font-family: var(--mono); font-size: 0.8125rem; letter-spacing: 0; }
+    .label { font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--graphite); }
+
+    /* Masthead */
+    .masthead { display: grid; grid-template-columns: repeat(12, 1fr); gap: 0 24px; align-items: end;
+      padding-bottom: calc(var(--grid) * 3); border-bottom: 3px solid var(--ink); }
+    .wordmark { grid-column: span 7; margin: 0; font-weight: 800; font-stretch: 72%; line-height: 0.82;
+      font-size: clamp(3.5rem, 10vw, 8.5rem); letter-spacing: -0.02em; text-wrap: balance; }
+    .wordmark span { color: var(--signal); }
+    .masthead-meta { grid-column: span 5; display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; padding-bottom: 6px; }
+    .masthead-meta dt { margin: 0; }
+    .masthead-meta dd { margin: 0; }
+
+    /* Numbered section bars */
+    .section { margin-top: calc(var(--grid) * 6); }
+    .bar { display: flex; align-items: baseline; gap: 16px; margin: 0 0 calc(var(--grid) * 3);
+      padding: 6px 12px; background: var(--ink); color: var(--paper);
+      font-size: 0.8125rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+    .bar .no { color: var(--signal); font-weight: 800; letter-spacing: 0.04em; }
+    .bar .aside { margin-left: auto; font-weight: 500; letter-spacing: 0.06em; text-transform: none; opacity: 0.75; }
+
+    /* 01 Parameters: a procedures-sheet form, underline fields, no boxes */
+    form { display: grid; grid-template-columns: repeat(12, 1fr); gap: calc(var(--grid) * 3) 24px; align-items: end; }
+    .f { display: flex; flex-direction: column; gap: 6px; grid-column: span 3; }
+    .f.w4 { grid-column: span 4; } .f.w2 { grid-column: span 2; }
+    .f label { font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--graphite); }
+    .f input, .f select {
+      font: 500 1.0625rem/1.2 var(--sans); font-variant-numeric: tabular-nums; color: var(--ink);
+      background: transparent; border: 0; border-bottom: 1px solid var(--ink); border-radius: 0;
+      padding: 6px 0 7px; width: 100%; appearance: none; -webkit-appearance: none;
+    }
+    .f select { background-image: linear-gradient(45deg, transparent 50%, var(--ink) 50%), linear-gradient(-45deg, transparent 50%, var(--ink) 50%);
+      background-position: right 6px center, right 1px center; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 20px; }
+    .f input:focus, .f select:focus { outline: none; border-bottom: 2px solid var(--signal); padding-bottom: 6px; }
+    .f input:focus-visible, .f select:focus-visible { background: var(--field); }
+    .actions { grid-column: span 4; display: flex; gap: 0; }
+    button { font: 700 0.8125rem/1 var(--sans); letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer;
+      border: 2px solid var(--ink); border-radius: 0; padding: 14px 18px; min-height: 44px; }
+    button.go { background: var(--signal); border-color: var(--signal); color: var(--on-signal); flex: 1; }
+    button.go:hover { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+    button.locate { background: transparent; color: var(--ink); border-left: 0; }
+    button.locate:hover { background: var(--ink); color: var(--paper); }
+    button:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
+
+    .error { margin-top: calc(var(--grid) * 4); display: grid; grid-template-columns: auto 1fr; gap: 16px;
+      border-top: 3px solid var(--signal); padding-top: 12px; }
+    .error strong { color: var(--signal); font-size: 0.8125rem; letter-spacing: 0.14em; text-transform: uppercase; }
+
+    /* 02 Status */
+    .status { display: grid; grid-template-columns: repeat(12, 1fr); gap: 0 24px; }
+    .countdown { grid-column: span 6; padding-right: 24px; border-right: 1px solid var(--rule); }
+    .t-minus { margin: 4px 0 8px; font-weight: 800; font-stretch: 75%; line-height: 0.9; letter-spacing: -0.02em;
+      font-size: clamp(3.25rem, 8vw, 6.5rem); color: var(--signal); white-space: nowrap; }
+    .t-minus small { font-size: 0.42em; font-weight: 700; letter-spacing: 0; margin-right: 0.08em; }
+    .countdown p { margin: 0; max-width: 46ch; text-wrap: pretty; }
+    .readouts { grid-column: span 6; display: grid; grid-template-columns: repeat(2, 1fr); }
+    .readout { padding: 0 0 16px 24px; border-bottom: 1px solid var(--rule); }
+    .readout:nth-child(n+3) { padding-top: 16px; border-bottom: 0; }
+    .readout .v { font-size: 1.75rem; font-weight: 700; font-stretch: 85%; line-height: 1.1; margin: 4px 0 2px; }
+    .readout .v.live { color: var(--signal); }
+    .readout .d { color: var(--graphite); font-size: 0.875rem; }
+
+    /* 03 Passes + 04 Sky, side by side */
+    .split { display: grid; grid-template-columns: repeat(12, 1fr); gap: 0 24px; align-items: start; }
+    .split > .passes { grid-column: span 7; }
+    .split > .sky { grid-column: span 5; }
     .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-    th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-    th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
-    td.num, th.num { text-align: right; }
-    iframe { width: 100%; height: 520px; border: 1px solid var(--border); border-radius: 8px; }
-    .muted { color: var(--muted); font-size: 13px; }
-    a { color: var(--accent); }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--graphite); padding: 0 10px 8px 0; border-bottom: 2px solid var(--ink); white-space: nowrap; }
+    td { padding: 11px 10px 11px 0; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+    td.no { font-weight: 800; width: 2.5em; }
+    .num { text-align: right; }
+    td.rise { font-weight: 700; }
+    tbody tr { cursor: default; }
+    tbody tr.is-next td.no { color: var(--signal); }
+    tbody tr.is-hot td { background: var(--field); }
+    tbody tr.is-hot td.no, tbody tr.is-hot td.rise { color: var(--signal); }
+    .empty { margin: 0; padding: 24px 0; border-top: 2px solid var(--ink); border-bottom: 1px solid var(--rule); }
+    .note { margin: 12px 0 0; color: var(--graphite); font-size: 0.875rem; max-width: 70ch; text-wrap: pretty; }
+
+    .skyplot { width: 100%; max-width: 420px; height: auto; display: block; margin: 0 auto; }
+    .skyplot .ring { fill: none; stroke: var(--rule); stroke-width: 1; }
+    .skyplot .horizon { fill: none; stroke: var(--ink); stroke-width: 2; }
+    .skyplot .mask { fill: none; stroke: var(--ink); stroke-width: 1; stroke-dasharray: 2 4; }
+    .skyplot .axis { stroke: var(--rule); stroke-width: 1; }
+    .skyplot text { font-family: var(--sans); fill: var(--graphite); font-size: 10px; font-weight: 600; letter-spacing: 0.08em; }
+    .skyplot .cardinal { fill: var(--ink); font-size: 12px; font-weight: 800; }
+    .skyplot .path { fill: none; stroke: var(--ink); stroke-width: 1.5; opacity: 0.55; }
+    .skyplot .tick { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
+    .skyplot .tag { fill: var(--ink); font-size: 11px; font-weight: 800; letter-spacing: 0; }
+    .skyplot .pass.is-next .path { stroke: var(--signal); opacity: 1; stroke-width: 2.5; }
+    .skyplot .pass.is-next .tick { stroke: var(--signal); }
+    .skyplot .pass.is-next .tag { fill: var(--signal); }
+    .skyplot.has-hot .pass .path { opacity: 0.18; }
+    .skyplot.has-hot .pass.is-hot .path { opacity: 1; stroke: var(--signal); stroke-width: 3; }
+    .skyplot .pass.is-hot .tag { fill: var(--signal); }
+    .sky-legend { display: flex; justify-content: space-between; gap: 16px; margin-top: 12px; color: var(--graphite); font-size: 0.8125rem; }
+
+    /* 05 Ground track */
+    .mapframe { display: block; width: 100%; height: clamp(360px, 52vw, 560px); border: 0; border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); background: var(--field); }
+
+    /* Colophon */
+    .colophon { margin-top: calc(var(--grid) * 8); padding-top: 16px; border-top: 3px solid var(--ink);
+      display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px 24px; color: var(--graphite); font-size: 0.875rem; }
+    .colophon > div { grid-column: span 4; }
+    .colophon p { margin: 4px 0 0; text-wrap: pretty; }
+
+    @media (max-width: 900px) {
+      .wordmark, .masthead-meta { grid-column: 1 / -1; }
+      .masthead-meta { margin-top: 16px; }
+      .f, .f.w4 { grid-column: span 6; } .f.w2 { grid-column: span 3; }
+      .actions { grid-column: 1 / -1; }
+      .countdown, .readouts { grid-column: 1 / -1; }
+      .countdown { border-right: 0; padding-right: 0; padding-bottom: 24px; border-bottom: 1px solid var(--rule); margin-bottom: 16px; }
+      .readout { padding-left: 0; padding-right: 16px; }
+      .split > .passes, .split > .sky { grid-column: 1 / -1; }
+      .split > .sky { margin-top: calc(var(--grid) * 6); }
+      .colophon > div { grid-column: 1 / -1; }
+    }
+    @media (max-width: 520px) {
+      .f, .f.w4, .f.w2 { grid-column: 1 / -1; }
+      .bar .aside { display: none; }
+    }
   </style>
 </head>
 <body>
-<main>
-  <h1>OrbitTrack</h1>
-  <p class="subtitle">Satellite pass predictions from fresh CelesTrak orbital elements (SGP4).</p>
+<div class="sheet">
 
-  <section class="panel">
+  <header class="masthead">
+    <h1 class="wordmark">Orbit<span>/</span>Track</h1>
+    <dl class="masthead-meta">
+      <dt class="label">Function</dt><dd>Satellite pass prediction for a ground station</dd>
+      <dt class="label">Station</dt><dd>{{ params.station }}</dd>
+      {% if result %}
+      <dt class="label">Position</dt><dd class="mono">{{ result.station_lat }} · {{ result.station_lon }} · {{ params.elev | round | int }} m</dd>
+      {% endif %}
+      <dt class="label">Mask</dt><dd>{{ params.min_elevation }}° above horizon</dd>
+    </dl>
+  </header>
+
+  <section class="section" aria-labelledby="s-params">
+    <h2 class="bar" id="s-params"><span class="no">01</span> Parameters <span class="aside">Every value is kept in the URL</span></h2>
     <form method="get" action="/">
-      <label>Satellite (name or NORAD ID)
-        <input name="sat" value="{{ params.sat }}" list="satellite-names" required maxlength="60">
+      <div class="f w4">
+        <label for="sat">Satellite · name or NORAD ID</label>
+        <input id="sat" name="sat" value="{{ params.sat }}" list="satellite-names" required maxlength="60" autocomplete="off">
         <datalist id="satellite-names">
           {% for name in satellite_names %}<option value="{{ name }}">{% endfor %}
         </datalist>
-      </label>
-      <label>CelesTrak group
-        <select name="group">
+      </div>
+      <div class="f">
+        <label for="group">CelesTrak group</label>
+        <select id="group" name="group">
           {% for value, label in groups.items() %}
           <option value="{{ value }}" {% if value == params.group %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
-      </label>
-      <label>Station name <input name="station" value="{{ params.station }}" required maxlength="60"></label>
-      <label>Latitude (°N) <input name="lat" id="lat" type="number" step="any" min="-90" max="90" value="{{ params.lat }}" required></label>
-      <label>Longitude (°E) <input name="lon" id="lon" type="number" step="any" min="-180" max="180" value="{{ params.lon }}" required></label>
-      <label>Elevation (m) <input name="elev" type="number" step="any" min="-500" max="9000" value="{{ params.elev }}"></label>
-      <label>Time zone <input name="tz" id="tz" value="{{ params.tz }}" required></label>
-      <label>Hours ahead <input name="hours" type="number" step="any" min="0.1" max="{{ max_hours }}" value="{{ params.hours }}"></label>
-      <label>Elevation mask (°) <input name="min_elevation" type="number" step="any" min="0" max="89" value="{{ params.min_elevation }}"></label>
+      </div>
+      <div class="f">
+        <label for="station">Station name</label>
+        <input id="station" name="station" value="{{ params.station }}" required maxlength="60">
+      </div>
+      <div class="f w2">
+        <label for="hours">Window · hours</label>
+        <input id="hours" name="hours" type="number" step="any" min="0.1" max="{{ max_hours }}" value="{{ params.hours }}">
+      </div>
+      <div class="f w2">
+        <label for="lat">Latitude °N</label>
+        <input name="lat" id="lat" type="number" step="any" min="-90" max="90" value="{{ params.lat }}" required>
+      </div>
+      <div class="f w2">
+        <label for="lon">Longitude °E</label>
+        <input name="lon" id="lon" type="number" step="any" min="-180" max="180" value="{{ params.lon }}" required>
+      </div>
+      <div class="f w2">
+        <label for="elev">Elevation · m</label>
+        <input id="elev" name="elev" type="number" step="any" min="-500" max="9000" value="{{ params.elev }}">
+      </div>
+      <div class="f">
+        <label for="tz">Time zone</label>
+        <input name="tz" id="tz" value="{{ params.tz }}" required>
+      </div>
+      <div class="f w2">
+        <label for="min_elevation">Mask · degrees</label>
+        <input id="min_elevation" name="min_elevation" type="number" step="any" min="0" max="89" value="{{ params.min_elevation }}">
+      </div>
       <div class="actions">
-        <button class="primary" type="submit">Predict</button>
-        <button class="secondary" type="button" id="locate">Use my location</button>
+        <button class="go" type="submit">Predict passes</button>
+        <button class="locate" type="button" id="locate">Use my location</button>
       </div>
     </form>
   </section>
 
   {% if error %}
-  <section class="panel error">{{ error }}</section>
+  <div class="error" role="alert"><strong>Hold</strong><span>{{ error }}</span></div>
   {% endif %}
 
   {% if result %}
-  <section class="panel stats">
-    <div class="stat">
-      <div class="label">Satellite</div>
-      <div class="value">{{ result.name }}</div>
-      <div class="detail">NORAD {{ result.norad_id }} · TLE {{ result.tle_age }} old</div>
+  <section class="section" aria-labelledby="s-status">
+    <h2 class="bar" id="s-status"><span class="no">02</span> Status <span class="aside mono">{{ result.name }} · NORAD {{ result.norad_id }}</span></h2>
+    <div class="status">
+      <div class="countdown">
+        <div class="label">Next pass</div>
+        {% if result.next_pass %}
+        <div class="t-minus"><small>T−</small>{{ result.next_pass.until }}</div>
+        <p>Rises <strong>{{ result.next_pass.rise_time }}</strong> {{ result.next_pass.rise_day }}, travelling {{ result.next_pass.direction }}.
+          Peaks at {{ result.next_pass.max_el }} and stays above the mask for {{ result.next_pass.duration }}.</p>
+        {% else %}
+        <div class="t-minus">None</div>
+        <p>No complete pass above {{ params.min_elevation }}° in this window. Try a longer window or a lower mask.</p>
+        {% endif %}
+      </div>
+      <div class="readouts">
+        <div class="readout">
+          <div class="label">Elevation now</div>
+          <div class="v {% if result.visible %}live{% endif %}">{{ result.altitude }}</div>
+          <div class="d">{{ result.status | capitalize }}</div>
+        </div>
+        <div class="readout">
+          <div class="label">Azimuth · range</div>
+          <div class="v">{{ result.azimuth }}</div>
+          <div class="d">{{ result.range_km }} km line of sight</div>
+        </div>
+        <div class="readout">
+          <div class="label">Directly below</div>
+          <div class="v">{{ result.sub_point }}</div>
+          <div class="d">{{ result.height_km }} km above Earth</div>
+        </div>
+        <div class="readout">
+          <div class="label">Orbital elements</div>
+          <div class="v">{{ result.tle_age }}</div>
+          <div class="d mono">Epoch {{ result.tle_epoch }}</div>
+        </div>
+      </div>
     </div>
-    <div class="stat">
-      <div class="label">Right now</div>
-      <div class="value {% if result.visible %}visible{% endif %}">{{ result.altitude }} elevation</div>
-      <div class="detail">{{ result.status }} · azimuth {{ result.azimuth }} · {{ result.range_km }} km away</div>
-    </div>
-    <div class="stat">
-      <div class="label">Over</div>
-      <div class="value">{{ result.sub_point }}</div>
-      <div class="detail">{{ result.height_km }} km above Earth</div>
-    </div>
-    <div class="stat">
-      <div class="label">Next pass</div>
-      {% if result.next_pass %}
-      <div class="value">{{ result.next_pass.rise }}</div>
-      <div class="detail">in {{ result.next_pass.until }} · max {{ result.next_pass.max_el }} · {{ result.next_pass.duration }}</div>
+  </section>
+
+  <div class="split">
+    <section class="section passes" aria-labelledby="s-passes">
+      <h2 class="bar" id="s-passes"><span class="no">03</span> Passes <span class="aside">{{ params.tz }}</span></h2>
+      {% if result.passes %}
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>No.</th><th>Date</th><th>Rise</th><th>Peak</th><th>Set</th>
+            <th class="num">Max el</th><th>Track</th><th class="num">Duration</th>
+          </tr></thead>
+          <tbody>
+          {% for row in result.passes %}
+            <tr data-pass="{{ loop.index }}" tabindex="0" class="{% if loop.first %}is-next{% endif %}">
+              <td class="no">{{ "%02d" | format(loop.index) }}</td><td>{{ row.date }}</td><td class="rise">{{ row.rise }}</td>
+              <td>{{ row.peak }}</td><td>{{ row.set }}</td><td class="num">{{ row.max_el }}</td>
+              <td>{{ row.direction }}</td><td class="num">{{ row.duration }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
       {% else %}
-      <div class="value">None in window</div>
+      <p class="empty">No complete passes above {{ params.min_elevation }}° between {{ result.window_start }} and {{ result.window_end }}.</p>
       {% endif %}
-    </div>
-  </section>
+      <p class="note">Window {{ result.window_start }} to {{ result.window_end }}. Passes already under way at the start, or still under way at the end, are left out.</p>
+    </section>
 
-  <section class="panel">
-    <p class="muted" style="margin-top:0">Passes above {{ params.min_elevation }}° over {{ params.station }}
-      between {{ result.window_start }} and {{ result.window_end }} ({{ params.tz }}).</p>
-    {% if result.passes %}
-    <div class="table-wrap">
-      <table>
-        <thead><tr>
-          <th class="num">#</th><th>Date</th><th>Rise</th><th>Peak</th><th>Set</th>
-          <th class="num">Max el</th><th>Direction</th><th class="num">Duration</th>
-        </tr></thead>
-        <tbody>
-        {% for row in result.passes %}
-          <tr>
-            <td class="num">{{ loop.index }}</td><td>{{ row.date }}</td><td>{{ row.rise }}</td><td>{{ row.peak }}</td>
-            <td>{{ row.set }}</td><td class="num">{{ row.max_el }}</td><td>{{ row.direction }}</td><td class="num">{{ row.duration }}</td>
-          </tr>
+    <section class="section sky" aria-labelledby="s-sky">
+      <h2 class="bar" id="s-sky"><span class="no">04</span> Sky <span class="aside">Looking up</span></h2>
+      {% set sky = result.sky %}
+      <svg class="skyplot" id="skyplot" viewBox="0 0 {{ sky.size }} {{ sky.size }}" role="img"
+           aria-label="Sky plot: each pass's path across the sky. Center is straight overhead, the edge is the horizon, north at top.">
+        <line class="axis" x1="{{ sky.c }}" y1="{{ sky.c - sky.R }}" x2="{{ sky.c }}" y2="{{ sky.c + sky.R }}"/>
+        <line class="axis" x1="{{ sky.c - sky.R }}" y1="{{ sky.c }}" x2="{{ sky.c + sky.R }}" y2="{{ sky.c }}"/>
+        {% for ring in sky.rings %}
+        <circle class="ring" cx="{{ sky.c }}" cy="{{ sky.c }}" r="{{ ring.r }}"/>
+        <text x="{{ sky.c + 4 }}" y="{{ sky.c - ring.r - 3 }}">{{ ring.label }}</text>
         {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <p>No complete passes above the mask in this window.</p>
-    {% endif %}
-  </section>
+        <circle class="mask" cx="{{ sky.c }}" cy="{{ sky.c }}" r="{{ sky.mask_r }}"/>
+        <circle class="horizon" cx="{{ sky.c }}" cy="{{ sky.c }}" r="{{ sky.R }}"/>
+        <text class="cardinal" x="{{ sky.c }}" y="{{ sky.c - sky.R - 8 }}" text-anchor="middle">N</text>
+        <text class="cardinal" x="{{ sky.c + sky.R + 8 }}" y="{{ sky.c + 4 }}" text-anchor="start">E</text>
+        <text class="cardinal" x="{{ sky.c }}" y="{{ sky.c + sky.R + 18 }}" text-anchor="middle">S</text>
+        <text class="cardinal" x="{{ sky.c - sky.R - 8 }}" y="{{ sky.c + 4 }}" text-anchor="end">W</text>
+        {% for path in sky.paths %}
+        <g class="pass {% if loop.first %}is-next{% endif %}" data-pass="{{ path.number }}">
+          <path class="path" d="{{ path.d }}"/>
+          <circle class="tick" cx="{{ path.start[0] }}" cy="{{ path.start[1] }}" r="3"/>
+          <text class="tag" x="{{ path.peak[0] + 5 }}" y="{{ path.peak[1] - 5 }}">{{ "%02d" | format(path.number) }}</text>
+        </g>
+        {% endfor %}
+      </svg>
+      <div class="sky-legend"><span>○ rise point · dashed ring = {{ params.min_elevation }}° mask</span><span>Hover a pass to trace it</span></div>
+    </section>
+  </div>
 
-  <iframe src="/map?{{ map_query }}" title="Ground track map"></iframe>
-  <p class="muted">Same data as JSON: <a href="/api/passes?{{ map_query }}">/api/passes</a> ·
-    API docs: <a href="/docs">/docs</a></p>
+  <section class="section" aria-labelledby="s-track">
+    <h2 class="bar" id="s-track"><span class="no">05</span> Ground track <span class="aside">Next {{ params.hours }} h</span></h2>
+    <iframe class="mapframe" src="/map?{{ map_query }}" title="Ground track map"></iframe>
+  </section>
   {% endif %}
-</main>
+
+  <footer class="colophon">
+    <div>
+      <div class="label">Method</div>
+      <p>SGP4 propagation of two-line elements with Skyfield. Rise and set are found to within half a second.</p>
+    </div>
+    <div>
+      <div class="label">Data</div>
+      <p>Orbital elements from <a href="https://celestrak.org">CelesTrak</a>, refreshed every few hours.</p>
+    </div>
+    <div>
+      <div class="label">Machine-readable</div>
+      <p>{% if map_query %}<a href="/api/passes?{{ map_query }}">This result as JSON</a> · {% endif %}<a href="/docs">API docs</a> · <a href="https://github.com/Xenon757/Orbittrack">Source</a></p>
+    </div>
+  </footer>
+</div>
 <script>
   // Fill in the visitor's coordinates and time zone from the browser (only when they click).
   document.getElementById("locate").addEventListener("click", () => {
@@ -146,8 +358,18 @@
     navigator.geolocation.getCurrentPosition(position => {
       document.getElementById("lat").value = position.coords.latitude.toFixed(4);
       document.getElementById("lon").value = position.coords.longitude.toFixed(4);
-      document.querySelector("input[name=station]").value = "My location";
+      document.getElementById("station").value = "My location";
     });
+  });
+
+  // Hovering or focusing a pass row traces the same pass on the sky plot.
+  const sky = document.getElementById("skyplot");
+  document.querySelectorAll("tbody tr[data-pass]").forEach(row => {
+    const pass = sky && sky.querySelector(`.pass[data-pass="${row.dataset.pass}"]`);
+    const on = () => { row.classList.add("is-hot"); if (pass) { pass.classList.add("is-hot"); sky.classList.add("has-hot"); } };
+    const off = () => { row.classList.remove("is-hot"); if (pass) { pass.classList.remove("is-hot"); sky.classList.remove("has-hot"); } };
+    row.addEventListener("mouseenter", on); row.addEventListener("mouseleave", off);
+    row.addEventListener("focus", on); row.addEventListener("blur", off);
   });
 </script>
 </body>
