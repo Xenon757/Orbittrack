@@ -90,15 +90,35 @@ def test_api_reports_503_when_celestrak_is_unreachable(offline_client):
 
 # --- HTML page ---
 
-def test_page_shows_passes_next_pass_and_map(client):
+def test_page_shows_passes_next_pass_sky_plot_and_map(client):
     response = client.get("/", params=FIXED)
     assert response.status_code == 200
     page = response.text
     assert "ISS (ZARYA)" in page and "NORAD 25544" in page
-    assert page.count("<tr>") == 7  # header row + 6 passes
-    assert "2026-10-18 09:06 EDT" in page  # next pass rise, in the station's time zone
-    assert '<iframe src="/map?' in page and "start=2026-10-18T12%3A00%3A00%2B00%3A00" in page
+    assert page.count('<tr data-pass="') == 6  # one table row per pass
+    assert page.count('<g class="pass') == 6  # and one path per pass on the sky plot
+    assert "T−</small>1h 07m" in page  # countdown to the next pass from the fixed start time
+    assert "Rises <strong>09:06</strong> Sun 18 Oct, EDT" in page  # in the station's time zone
+    assert 'src="/map?' in page and "start=2026-10-18T12%3A00%3A00%2B00%3A00" in page
     assert '<option value="CSS (TIANHE)">' in page  # satellite name suggestions for the group
+
+
+def test_sky_plot_places_each_peak_by_its_elevation(tle_path):
+    # Looking straight up: the center is the zenith (90 deg) and the horizon is the outer circle,
+    # so a peak's distance from the center is R * (90 - max elevation) / 90.
+    satellites = load_satellites(tle_path)
+    prediction = web.predict(web.PassQuery(start="2026-10-18T12:00"), lambda group: satellites)
+    sky = web.sky_plot(prediction)
+
+    assert len(sky["paths"]) == len(prediction.passes) == 6
+    for path, p in zip(sky["paths"], prediction.passes):
+        x, y = path["peak"]
+        distance = ((x - web.SKY_CENTER) ** 2 + (y - web.SKY_CENTER) ** 2) ** 0.5
+        assert distance == pytest.approx(web.SKY_RADIUS * (90 - p.max_elevation_deg) / 90, abs=0.5)
+        # Both ends of every path sit on the mask ring.
+        for end_x, end_y in (path["start"], path["end"]):
+            ring = ((end_x - web.SKY_CENTER) ** 2 + (end_y - web.SKY_CENTER) ** 2) ** 0.5
+            assert ring == pytest.approx(sky["mask_r"], abs=0.5)
 
 
 def test_page_with_unknown_satellite_explains_the_problem(client):

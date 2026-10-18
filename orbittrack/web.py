@@ -5,6 +5,7 @@ Run locally with:
 """
 
 import logging
+import math
 import os
 import threading
 import time
@@ -25,7 +26,7 @@ from skyfield.timelib import Time
 
 from orbittrack.mapview import build_map
 from orbittrack.observe import LookAngles, SubPoint, look_angles, sub_point
-from orbittrack.passes import Pass, compass_direction, find_passes
+from orbittrack.passes import Pass, compass_direction, find_passes, sky_track
 from orbittrack.station import WEST_LAFAYETTE, GroundStation
 from orbittrack.tle import CELESTRAK_URL, fetch_tle_file, load_satellites, lookup_satellite, tle_age_days
 
@@ -231,6 +232,47 @@ def hours_and_minutes(span: timedelta) -> str:
     return f"{hours}h {minutes:02d}m"
 
 
+# Sky plot geometry (SVG user units). The plot is a view looking straight up: the center is
+# the zenith (90 deg elevation), the outer circle is the horizon, north is at the top.
+SKY_SIZE = 320
+SKY_CENTER = SKY_SIZE / 2
+SKY_RADIUS = 136
+
+
+def sky_xy(azimuth_deg: float, altitude_deg: float) -> tuple[float, float]:
+    """Polar projection: distance from the center grows linearly as elevation drops to 0."""
+    r = SKY_RADIUS * (90 - max(altitude_deg, 0.0)) / 90
+    a = math.radians(azimuth_deg)
+    return round(SKY_CENTER + r * math.sin(a), 1), round(SKY_CENTER - r * math.cos(a), 1)
+
+
+def sky_plot(p: Prediction) -> dict:
+    """SVG-ready geometry for each pass's path across the sky, plus the elevation rings."""
+    paths = []
+    for number, x in enumerate(p.passes, start=1):
+        track = sky_track(p.satellite, p.station, x)
+        points = [sky_xy(az, el) for az, el in track]
+        paths.append({
+            "number": number,
+            "d": "M" + " L".join(f"{px},{py}" for px, py in points),
+            "start": points[0],
+            "end": points[-1],
+            "peak": sky_xy(*max(track, key=lambda sample: sample[1])),
+        })
+    return {
+        "size": SKY_SIZE,
+        "c": SKY_CENTER,
+        "R": SKY_RADIUS,
+        "mask_r": round(SKY_RADIUS * (90 - p.station.min_elevation_deg) / 90, 1),
+        "rings": [{"r": round(SKY_RADIUS * (90 - el) / 90, 1), "label": f"{el}°"} for el in (30, 60)],
+        "paths": paths,
+    }
+
+
+def coordinate(value: float, positive: str, negative: str, decimals: int = 4) -> str:
+    return f"{abs(value):.{decimals}f}° {positive if value >= 0 else negative}"
+
+
 def page_result(p: Prediction) -> dict:
     """Everything the template shows, already formatted, so the template stays simple."""
     zone = p.station.local_zone()
@@ -251,6 +293,9 @@ def page_result(p: Prediction) -> dict:
         first = p.passes[0]
         next_pass = {
             "rise": local(first.rise),
+            "rise_time": local(first.rise, "%H:%M"),
+            "rise_day": local(first.rise, "%a %d %b, %Z"),
+            "direction": f"{compass_direction(first.rise_azimuth_deg)} → {compass_direction(first.set_azimuth_deg)}",
             "until": hours_and_minutes(first.rise - start),
             "max_el": f"{first.max_elevation_deg:.1f}°",
             "duration": format_duration(first.duration),
@@ -259,13 +304,17 @@ def page_result(p: Prediction) -> dict:
     return {
         "name": p.satellite.name.strip(),
         "norad_id": p.satellite.model.satnum,
+        "tle_epoch": p.satellite.epoch.utc_strftime("%Y-%m-%d %H:%M UTC"),
+        "station_lat": coordinate(p.station.latitude_deg, "N", "S"),
+        "station_lon": coordinate(p.station.longitude_deg, "E", "W"),
+        "sky": sky_plot(p),
         "tle_age": f"{tle_age_days(p.satellite, p.start):.2f} days",
         "altitude": f"{p.current.altitude_deg:.1f}°",
         "azimuth": f"{p.current.azimuth_deg:.0f}° ({compass_direction(p.current.azimuth_deg)})",
         "range_km": f"{p.current.range_km:,.0f}",
         "visible": p.current.altitude_deg >= p.station.min_elevation_deg,
         "status": status,
-        "sub_point": f"{p.below.latitude_deg:.2f}°, {p.below.longitude_deg:.2f}°",
+        "sub_point": f"{coordinate(p.below.latitude_deg, 'N', 'S', 1)} {coordinate(p.below.longitude_deg, 'E', 'W', 1)}",
         "height_km": f"{p.below.height_km:.0f}",
         "next_pass": next_pass,
         "window_start": local(start),
