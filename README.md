@@ -94,6 +94,14 @@ set azimuths, and duration. Because the app is meant to face the public:
 - An unknown satellite returns 404 with name suggestions; a failed download with nothing
   cached returns 503.
 
+### Deploying
+
+`render.yaml` is a [Render](https://render.com) Blueprint for a free web service: it installs
+`requirements.txt`, starts uvicorn on Render's `$PORT`, and uses `/healthz` (which needs no
+orbital data) as the health check. `.python-version` pins Python 3.12. On Render's free plan
+the service sleeps after 15 minutes without traffic and takes about a minute to wake, and its
+disk is wiped on restart, so the first request after waking downloads fresh TLEs.
+
 ### Example output
 
 These runs use the TLE file checked into `tests/fixtures/` and a fixed start time, so they are
@@ -215,7 +223,7 @@ overrides. The tests include:
   mixed in one schedule.
 - The map supports one satellite and one station.
 - The web app handles one satellite and one station per request; multi-satellite contact
-  scheduling is CLI-only. It is set up to run locally and is not deployed anywhere.
+  scheduling is CLI-only.
 - Contact scheduling ignores pass quality, priorities and antenna slew/setup time between contacts.
 - Atmospheric refraction is not modeled.
 - Accuracy is limited by SGP4 and the age of the TLE; always use fresh elements.
