@@ -1,0 +1,13 @@
+# Render Blueprint: deploys the OrbitTrack web app as a free web service.
+# Python version comes from .python-version.
+services:
+  - type: web
+    name: orbittrack
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # Render routes traffic to $PORT on 0.0.0.0. One worker keeps a single shared TLE cache
+    # and fits the free instance's memory.
+    startCommand: uvicorn orbittrack.web:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit  # redeploy on every push to the connected branch
