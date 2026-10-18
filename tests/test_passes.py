@@ -7,7 +7,7 @@ import pytest
 from skyfield.api import load
 
 from orbittrack.observe import look_angles
-from orbittrack.passes import CULMINATE, RISE, SET, compass_direction, find_passes, group_into_passes
+from orbittrack.passes import CULMINATE, RISE, SET, compass_direction, find_passes, group_into_passes, sky_track
 from orbittrack.station import WEST_LAFAYETTE
 
 ts = load.timescale()
@@ -138,3 +138,19 @@ def test_iss_is_never_visible_far_beyond_its_inclination(iss, latitude, sees_iss
 @pytest.mark.parametrize("azimuth, label", [(0, "N"), (359, "N"), (44, "NE"), (90, "E"), (225, "SW"), (300, "NW")])
 def test_compass_direction(azimuth, label):
     assert compass_direction(azimuth) == label
+
+
+# --- sky track (the path across the station's sky) ---
+
+def test_sky_track_runs_from_rise_to_set_through_the_peak(iss, passes):
+    for p in passes:
+        track = sky_track(iss, WEST_LAFAYETTE, p)
+        azimuths, altitudes = zip(*track)
+        # Starts and ends on the mask, at the rise and set azimuths.
+        assert altitudes[0] == pytest.approx(WEST_LAFAYETTE.min_elevation_deg, abs=0.05)
+        assert altitudes[-1] == pytest.approx(WEST_LAFAYETTE.min_elevation_deg, abs=0.05)
+        assert azimuths[0] == pytest.approx(p.rise_azimuth_deg, abs=0.01)
+        assert azimuths[-1] == pytest.approx(p.set_azimuth_deg, abs=0.01)
+        # Never dips below the mask, and tops out at the predicted max elevation.
+        assert min(altitudes) >= WEST_LAFAYETTE.min_elevation_deg - 0.05
+        assert max(altitudes) == pytest.approx(p.max_elevation_deg, abs=0.1)

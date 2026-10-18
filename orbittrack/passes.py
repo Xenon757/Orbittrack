@@ -3,11 +3,14 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from skyfield.api import EarthSatellite
+import numpy as np
+from skyfield.api import EarthSatellite, load
 from skyfield.timelib import Time
 
 from orbittrack.observe import look_angles
 from orbittrack.station import GroundStation
+
+_ts = load.timescale()
 
 # Event codes returned by Skyfield's find_events().
 RISE, CULMINATE, SET = 0, 1, 2
@@ -81,6 +84,23 @@ def find_passes(
             )
         )
     return passes
+
+
+def sky_track(satellite: EarthSatellite, station: GroundStation, p: Pass, points: int = 48) -> list[tuple[float, float]]:
+    """(azimuth, altitude) in degrees from rise to set: evenly spaced samples plus the exact peak.
+
+    This is the path the satellite traces across the station's sky: what an antenna would
+    have to follow, and what a polar "sky plot" draws.
+    """
+    start = _ts.from_datetime(p.rise)
+    days = p.duration.total_seconds() / 86400
+    peak = (p.culmination - p.rise).total_seconds() / 86400
+    # Even spacing plus the exact peak: near the zenith the altitude changes so fast that even
+    # spacing alone can miss the top of a high pass by a degree or more.
+    offsets = np.sort(np.append(np.linspace(0.0, days, points), peak))
+    times = start + offsets  # one Time holding every sample, so SGP4 runs vectorized
+    altitude, azimuth, _ = (satellite - station.position()).at(times).altaz()
+    return list(zip(azimuth.degrees.tolist(), altitude.degrees.tolist()))
 
 
 def compass_direction(azimuth_deg: float) -> str:
