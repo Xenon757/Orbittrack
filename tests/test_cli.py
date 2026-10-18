@@ -81,6 +81,12 @@ def test_unknown_satellite_suggests_close_names(capsys):
     ["--min-elevation", "90"],
     ["--start", "yesterday"],
     ["--tz", "Mars/Olympus"],
+    ["--station", "x,1"],  # too few fields
+    ["--station", "Bad,95,0"],  # impossible latitude
+    ["--station", "x,a,b"],  # not numbers
+    ["--station", "x,1,1,0,Mars/Olympus"],
+    ["--station", "west-lafayette", "--lat", "1", "--lon", "1"],  # two ways to give a location
+    ["--sat", "25544", "--sat", "48274", "--map", "x.html"],  # map is single-satellite only
 ])
 def test_bad_input_is_rejected_with_usage_error(capsys, bad_args):
     with pytest.raises(SystemExit) as exit_info:
@@ -91,3 +97,42 @@ def test_bad_input_is_rejected_with_usage_error(capsys, bad_args):
 def test_start_without_offset_is_utc_and_offsets_are_kept():
     assert cli.utc_datetime("2026-10-18T12:00").tzinfo == timezone.utc
     assert cli.utc_datetime("2026-10-18T08:00-04:00").utcoffset() == timedelta(hours=-4)
+
+
+# --- several satellites / stations: the combined contact schedule ---
+
+HOUSTON = "Houston,29.5593,-95.09,10,America/Chicago"
+THREE_SATS = ["--sat", "25544", "--sat", "CSS (TIANHE)", "--sat", "TIANZHOU-10"]
+
+
+def test_schedule_lists_every_contact_and_drops_conflicts(capsys):
+    out = run(capsys, *THREE_SATS, "--station", "west-lafayette", "--station", HOUSTON)
+    assert "for 3 satellite(s) at 2 station(s) (times in UTC)" in out
+    assert len(PASS_ROW.findall(out)) == 29
+    # Tianzhou-10 is docked to CSS, so every one of its 10 contacts collides with a CSS contact.
+    assert "Scheduled 19 of 29 contacts; 10 dropped because the station was already busy." in out
+    assert out.count("conflict: station busy with #") == 10
+    assert "Next contact: #1 ISS (ZARYA) over West Lafayette, IN at 2026-10-18 13:06:50 UTC (in 1h 07m)" in out
+
+
+def test_schedule_at_one_station_uses_its_time_zone(capsys):
+    out = run(capsys, "--sat", "25544", "--sat", "48274")
+    assert "at 1 station(s) (times in America/Indiana/Indianapolis)" in out
+
+
+def test_tz_overrides_the_schedule_time_zone(capsys):
+    out = run(capsys, "--sat", "25544", "--station", "west-lafayette", "--station", HOUSTON, "--tz", "Asia/Tokyo")
+    assert "(times in Asia/Tokyo)" in out
+
+
+def test_same_satellite_twice_is_counted_once(capsys):
+    out = run(capsys, "--sat", "25544", "--sat", "ISS (ZARYA)")
+    assert "Satellite:  ISS (ZARYA) (NORAD 25544)" in out  # back to the single-satellite view
+
+
+def test_station_spec_parses_presets_and_custom_stations():
+    assert cli.station_spec("West-Lafayette") == cli.WEST_LAFAYETTE
+    minimal = cli.station_spec("Houston, 29.56, -95.09")
+    assert (minimal.name, minimal.latitude_deg, minimal.elevation_m, minimal.timezone) == ("Houston", 29.56, 0.0, "UTC")
+    full = cli.station_spec(HOUSTON)
+    assert (full.elevation_m, full.timezone) == (10.0, "America/Chicago")
