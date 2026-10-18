@@ -52,3 +52,4 @@ def test_map_animates_the_marker_from_the_track_samples(page):
     # The script moves the satellite marker along the same 30-second samples as the drawn track.
     assert "setLatLng" in page and "predicted position now" in page
     assert '"times_ms": [' in page
+    assert "trail.setLatLngs" in page and f'color: "{PASS_COLOR}"' in page  # red trail behind the marker

@@ -40,7 +40,11 @@ MAP_STYLE = f"""
 
 LIVE_MARKER_JS = """
 window.addEventListener("load", function () {
-  var marker = %(marker)s, live = %(live)s, times = live.times_ms, pts = live.points;
+  var map = %(map)s, marker = %(marker)s, live = %(live)s, times = live.times_ms, pts = live.points;
+  // The path already flown since the start of the window, drawn under the marker.
+  var trail = L.polyline([], {color: "%(color)s", weight: 2.5, opacity: 0.95, interactive: false}).addTo(map);
+  marker.bringToFront();
+
   function tick() {
     var now = Date.now();
     if (now < times[0] || now > times[times.length - 1]) return;
@@ -51,8 +55,19 @@ window.addEventListener("load", function () {
     if (lonB - a[1] > 180) lonB -= 360;
     if (lonB - a[1] < -180) lonB += 360;
     var lon = ((a[1] + (lonB - a[1]) * f + 540) %% 360) - 180;
-    marker.setLatLng([a[0] + (b[0] - a[0]) * f, lon]);
+    var here = [a[0] + (b[0] - a[0]) * f, lon];
+    marker.setLatLng(here);
     marker.setTooltipContent(live.label);
+
+    // Samples up to now plus the current position, split wherever longitude wraps at +/-180
+    // (like the drawn track) so the trail never streaks across the whole map.
+    var segments = [[]], flown = pts.slice(0, i + 1).concat([here]);
+    for (var k = 0; k < flown.length; k++) {
+      var last = segments[segments.length - 1];
+      if (last.length && Math.abs(flown[k][1] - last[last.length - 1][1]) > 180) segments.push([]);
+      segments[segments.length - 1].push(flown[k]);
+    }
+    trail.setLatLngs(segments);
   }
   tick();
   setInterval(tick, 1000);
@@ -107,14 +122,16 @@ def build_map(
     ).add_to(fmap)
 
     # While "now" falls inside the window, glide the marker to the predicted position every
-    # second by interpolating between the 30-second track samples computed above.
+    # second by interpolating between the 30-second track samples computed above, leaving a
+    # red trail along the part of the track already flown.
     live = {
         "start_ms": round(track[0].time.timestamp() * 1000),
         "times_ms": [round(q.time.timestamp() * 1000) for q in track],
         "points": [[round(q.latitude_deg, 3), round(q.longitude_deg, 3)] for q in track],
         "label": f"{sat_name} · predicted position now",
     }
-    fmap.get_root().script.add_child(folium.Element(LIVE_MARKER_JS % {"marker": marker.get_name(), "live": json.dumps(live)}))
+    script = LIVE_MARKER_JS % {"map": fmap.get_name(), "marker": marker.get_name(), "live": json.dumps(live), "color": PASS_COLOR}
+    fmap.get_root().script.add_child(folium.Element(script))
 
     title = (f"{sat_name} ground track, {track[0].time.astimezone(zone):%Y-%m-%d %H:%M} to "
              f"{track[-1].time.astimezone(zone):%Y-%m-%d %H:%M %Z} &middot; "
