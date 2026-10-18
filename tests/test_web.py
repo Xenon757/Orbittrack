@@ -126,6 +126,12 @@ def test_map_route_renders_the_ground_track(client):
     assert "ISS (ZARYA)" in response.text and "Coverage above 10°" in response.text
 
 
+def test_health_check_needs_no_orbital_data(offline_client):
+    # Even with CelesTrak unreachable the app itself is healthy, so this must still say ok.
+    response = offline_client.get("/healthz")
+    assert response.status_code == 200 and response.json() == {"status": "ok"}
+
+
 # --- the shared TLE cache ---
 
 def test_load_group_parses_once_until_the_file_changes(tle_path, tmp_path, monkeypatch):

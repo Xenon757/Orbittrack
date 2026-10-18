@@ -297,6 +297,12 @@ def api_passes(params: Params, load_satellites_for: GroupLoader) -> dict:
     return prediction_json(_predict_or_http_error(params, load_satellites_for))
 
 
+@app.get("/healthz")
+def health() -> dict:
+    """For the hosting platform's health checks: answers instantly, without CelesTrak or orbit math."""
+    return {"status": "ok"}
+
+
 def _predict_or_http_error(params: PassQuery, load_satellites_for: Callable[[str], list[EarthSatellite]]) -> Prediction:
     try:
         return predict(params, load_satellites_for)
