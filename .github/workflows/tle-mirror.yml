@@ -1,0 +1,61 @@
+# Mirrors CelesTrak's TLE files for the web app's groups to GitHub Pages every 6 hours.
+#
+# Why: some hosting networks (including Render's) can't reach CelesTrak, so the deployed web
+# app reads these copies instead (ORBITTRACK_TLE_URL). Four runs a day is well within
+# CelesTrak's request limits. If any download fails, the job fails before publishing, so the
+# last good mirror stays online.
+name: Mirror TLEs to GitHub Pages
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"  # off the top of the hour, when GitHub's scheduler is busiest
+  workflow_dispatch:  # allow manual runs from the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: tle-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      # Must match the Group list in orbittrack/web.py (a test checks this).
+      GROUPS: "stations visual weather amateur science gps-ops"
+    steps:
+      - name: Download TLE files from CelesTrak
+        run: |
+          mkdir site
+          for group in $GROUPS; do
+            curl --fail --silent --show-error --retry 3 --retry-delay 10 --max-time 60 \
+              --user-agent "OrbitTrack-mirror (github.com/${GITHUB_REPOSITORY})" \
+              --output "site/${group}.tle" \
+              "https://celestrak.org/NORAD/elements/gp.php?GROUP=${group}&FORMAT=tle"
+            # Every 3-line TLE record has a line starting with "1 "; anything else is an error page.
+            grep -q '^1 ' "site/${group}.tle" || { echo "No TLE data for ${group}"; exit 1; }
+            echo "${group}: $(grep -c '^1 ' "site/${group}.tle") satellites"
+          done
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > site/updated.txt
+          {
+            echo "<!doctype html><title>OrbitTrack TLE mirror</title>"
+            echo "<p>Copies of CelesTrak TLE files used by the OrbitTrack web app."
+            echo "Updated $(cat site/updated.txt). Source: <a href=\"https://celestrak.org\">CelesTrak</a>.</p><ul>"
+            for group in $GROUPS; do echo "<li><a href=\"${group}.tle\">${group}.tle</a></li>"; done
+            echo "</ul>"
+          } > site/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v5

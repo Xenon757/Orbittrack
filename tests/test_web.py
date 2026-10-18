@@ -7,6 +7,7 @@ so these tests never download anything.
 import os
 import shutil
 import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -200,3 +201,12 @@ def test_bad_data_from_the_source_is_treated_as_an_outage(monkeypatch):
     monkeypatch.setattr(web, "_last_failure", {})
     with pytest.raises(OSError, match="did not return TLE data"):
         web.load_group("stations")
+
+
+def test_mirror_workflow_mirrors_exactly_the_allowed_groups():
+    # The deployed app reads TLEs from the GitHub Pages mirror, so a group missing from the
+    # workflow would 503 in production even though every local test passed.
+    workflow = (Path(__file__).parent.parent / ".github" / "workflows" / "tle-mirror.yml").read_text()
+    line = next(line for line in workflow.splitlines() if line.strip().startswith("GROUPS:"))
+    mirrored = line.split(":", 1)[1].strip().strip('"').split()
+    assert sorted(mirrored) == sorted(web.GROUP_LABELS)
