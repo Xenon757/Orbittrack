@@ -18,10 +18,12 @@ from urllib.parse import urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
-from skyfield.api import EarthSatellite, load
+import numpy as np
+from skyfield.api import EarthSatellite, load, wgs84
 from skyfield.timelib import Time
 
 from orbittrack.mapview import build_map
@@ -47,6 +49,9 @@ assert set(GROUP_LABELS) == set(get_args(Group))
 MAX_HOURS = 72  # each request does real orbit math; cap the work one visitor can ask for
 
 app = FastAPI(title="OrbitTrack", description="Satellite pass predictions for a ground station.")
+# Pages carry a day or more of position samples for the live display; numeric text like that
+# compresses several-fold, so gzip anything over 1 KB for browsers that accept it.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 ts = load.timescale()
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
@@ -273,6 +278,49 @@ def coordinate(value: float, positive: str, negative: str, decimals: int = 4) ->
     return f"{abs(value):.{decimals}f}° {positive if value >= 0 else negative}"
 
 
+LIVE_STEP_SECONDS = 30
+
+
+def live_samples(p: Prediction, step_seconds: float = LIVE_STEP_SECONDS) -> dict:
+    """SGP4 samples across the window, so the browser can show the predicted position *now*.
+
+    Sample i is at min(i * step_s, duration_s) seconds after the start (evenly spaced, so the
+    time isn't stored): [sub-point lat, lon, height km, east km, north km, up km].
+    East/north/up is the satellite's position relative to the station. The browser interpolates
+    that 3D vector (not the angles) between samples and converts it to azimuth/elevation:
+    near the zenith the azimuth can swing through 180 degrees in seconds, so interpolating
+    angles directly would give nonsense there, while the 3D position changes smoothly.
+    """
+    duration = (p.end - p.start) * 86400
+    offsets = np.append(np.arange(0.0, duration, step_seconds), duration)
+    times = p.start + offsets / 86400  # one Time holding every sample, so SGP4 runs vectorized
+
+    altitude, azimuth, distance = (p.satellite - p.station.position()).at(times).altaz()
+    alt, az, km = altitude.radians, azimuth.radians, distance.km
+    east, north, up = km * np.cos(alt) * np.sin(az), km * np.cos(alt) * np.cos(az), km * np.sin(alt)
+
+    geocentric = p.satellite.at(times)
+    latitude, longitude = wgs84.latlon_of(geocentric)
+    height = wgs84.height_of(geocentric).km
+
+    def ms(moment: datetime) -> int:
+        return round(moment.timestamp() * 1000)
+
+    return {
+        "start_ms": ms(p.start.utc_datetime()),
+        "step_s": step_seconds,
+        "duration_s": round(float(duration), 3),
+        "mask_deg": p.station.min_elevation_deg,
+        "sky": {"c": SKY_CENTER, "R": SKY_RADIUS},
+        "passes": [[ms(x.rise), ms(x.set)] for x in p.passes],
+        "samples": [
+            [round(float(la), 3), round(float(lo), 3), round(float(h), 1),
+             round(float(e), 1), round(float(n), 1), round(float(u), 1)]
+            for la, lo, h, e, n, u in zip(latitude.degrees, longitude.degrees, height, east, north, up)
+        ],
+    }
+
+
 def page_result(p: Prediction) -> dict:
     """Everything the template shows, already formatted, so the template stays simple."""
     zone = p.station.local_zone()
@@ -308,6 +356,7 @@ def page_result(p: Prediction) -> dict:
         "station_lat": coordinate(p.station.latitude_deg, "N", "S"),
         "station_lon": coordinate(p.station.longitude_deg, "E", "W"),
         "sky": sky_plot(p),
+        "live": live_samples(p),
         "tle_age": f"{tle_age_days(p.satellite, p.start):.2f} days",
         "altitude": f"{p.current.altitude_deg:.1f}°",
         "azimuth": f"{p.current.azimuth_deg:.0f}° ({compass_direction(p.current.azimuth_deg)})",

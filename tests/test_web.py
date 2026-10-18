@@ -230,3 +230,71 @@ def test_mirror_workflow_mirrors_exactly_the_allowed_groups():
     line = next(line for line in workflow.splitlines() if line.strip().startswith("GROUPS:"))
     mirrored = line.split(":", 1)[1].strip().strip('"').split()
     assert sorted(mirrored) == sorted(web.GROUP_LABELS)
+
+
+# --- live display samples ---
+
+@pytest.fixture(scope="module")
+def fixed_prediction(tle_path):
+    satellites = load_satellites(tle_path)
+    return web.predict(web.PassQuery(start="2026-10-18T12:00"), lambda group: satellites)
+
+
+def to_alt_az_range(east, north, up):
+    """The same conversion the browser does."""
+    import math
+    distance = math.sqrt(east ** 2 + north ** 2 + up ** 2)
+    return math.degrees(math.asin(up / distance)), math.degrees(math.atan2(east, north)) % 360, distance
+
+
+def test_live_samples_cover_the_window_every_30_seconds(fixed_prediction):
+    live = web.live_samples(fixed_prediction)
+    assert live["step_s"] == 30 and live["duration_s"] == 24 * 3600
+    assert len(live["samples"]) == 24 * 3600 // 30 + 1
+    assert live["start_ms"] == round(fixed_prediction.start.utc_datetime().timestamp() * 1000)
+    assert live["passes"] == [[round(x.rise.timestamp() * 1000), round(x.set.timestamp() * 1000)]
+                              for x in fixed_prediction.passes]
+
+
+def test_live_samples_match_the_direct_calculation(fixed_prediction, iss):
+    live = web.live_samples(fixed_prediction)
+    for index in (0, 1000, 2880):
+        moment = fixed_prediction.start + index * 30 / 86400
+        expected = web.look_angles(iss, fixed_prediction.station, moment)
+        lat, lon, height, east, north, up = live["samples"][index]
+        altitude, azimuth, distance = to_alt_az_range(east, north, up)
+        assert altitude == pytest.approx(expected.altitude_deg, abs=0.01)
+        assert azimuth == pytest.approx(expected.azimuth_deg, abs=0.05)
+        assert distance == pytest.approx(expected.range_km, abs=0.2)
+
+
+def test_interpolating_between_samples_points_within_a_tenth_of_a_degree(fixed_prediction, iss):
+    # The browser shows positions between samples by straight-line interpolation of the
+    # east/north/up vector. Halfway between samples is the worst case; while the satellite
+    # is above the horizon, that must stay below the 0.1 deg the page displays.
+    import numpy as np
+    live = web.live_samples(fixed_prediction)
+    samples = np.array([s[3:] for s in live["samples"]])
+    halfway = fixed_prediction.start + (np.arange(len(samples) - 1) * 30 + 15) / 86400
+    alt, az, km = (iss - fixed_prediction.station.position()).at(halfway).altaz()
+    a, z, k = alt.radians, az.radians, km.km
+    truth = np.stack([k * np.cos(a) * np.sin(z), k * np.cos(a) * np.cos(z), k * np.sin(a)], axis=1)
+    guess = (samples[:-1] + samples[1:]) / 2
+    cos = np.sum(guess * truth, axis=1) / (np.linalg.norm(guess, axis=1) * np.linalg.norm(truth, axis=1))
+    error_deg = np.degrees(np.arccos(np.clip(cos, -1, 1)))
+    above = truth[:, 2] > 0
+    assert above.any() and error_deg[above].max() < 0.1
+
+
+def test_page_embeds_live_samples_as_json(client):
+    import json
+    import re
+    page = client.get("/", params=FIXED).text
+    match = re.search(r'<script type="application/json" id="live">(.*?)</script>', page, re.S)
+    assert match, "live data block missing"
+    assert len(json.loads(match.group(1))["samples"]) == 2881
+
+
+def test_responses_are_gzipped_when_the_browser_accepts_it(client):
+    response = client.get("/", params=FIXED, headers={"Accept-Encoding": "gzip"})
+    assert response.headers.get("content-encoding") == "gzip"
