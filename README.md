@@ -1,5 +1,7 @@
 # OrbitTrack
 
+> Developed locally since 2025; this repository was created in 2026 to deploy the project as a live site.
+
 A command-line satellite pass predictor for a ground station. It downloads current orbital
 elements (TLEs) from [CelesTrak](https://celestrak.org), propagates them with SGP4, and
 predicts when satellites rise above, peak over, and set below a station's elevation mask.
