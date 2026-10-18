@@ -54,7 +54,8 @@
       padding: 6px 12px; background: var(--ink); color: var(--paper);
       font-size: 0.8125rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
     .bar .no { color: var(--signal); font-weight: 800; letter-spacing: 0.04em; }
-    .bar .aside { margin-left: auto; font-weight: 500; letter-spacing: 0.06em; text-transform: none; opacity: 0.75; }
+    .bar .aside { margin-left: auto; display: inline-flex; align-items: baseline; gap: 20px; font-weight: 500;
+      letter-spacing: 0.06em; text-transform: none; opacity: 0.75; }
 
     /* 01 Parameters: a procedures-sheet form, underline fields, no boxes */
     form { display: grid; grid-template-columns: repeat(12, 1fr); gap: calc(var(--grid) * 3) 24px; align-items: end; }
@@ -132,6 +133,13 @@
     .skyplot.has-hot .pass .path { opacity: 0.18; }
     .skyplot.has-hot .pass.is-hot .path { opacity: 1; stroke: var(--signal); stroke-width: 3; }
     .skyplot .pass.is-hot .tag { fill: var(--signal); }
+    .skyplot .now-dot { fill: var(--signal); stroke: var(--paper); stroke-width: 2; }
+    .skyplot .now-ring { fill: none; stroke: var(--signal); stroke-width: 1.5; }
+    .skyplot .now-label { fill: var(--signal); font-size: 10px; font-weight: 800; letter-spacing: 0.12em; }
+    .live-badge { display: inline-flex; align-items: center; gap: 8px; }
+    .live-badge[hidden] { display: none; }
+    .live-badge::before { content: ""; width: 8px; height: 8px; background: var(--signal); }
+    .t-minus .s { font-size: 0.5em; letter-spacing: 0; }
     .sky-legend { display: flex; justify-content: space-between; gap: 16px; margin-top: 12px; color: var(--graphite); font-size: 0.8125rem; }
 
     /* 05 Ground track */
@@ -235,13 +243,15 @@
 
   {% if result %}
   <section class="section" aria-labelledby="s-status">
-    <h2 class="bar" id="s-status"><span class="no">02</span> Status <span class="aside mono">{{ result.name }} · NORAD {{ result.norad_id }}</span></h2>
+    <h2 class="bar" id="s-status"><span class="no">02</span> Status
+      <span class="aside"><span class="live-badge" id="live-badge" hidden>Live · predicted from orbital elements</span>
+        <span class="mono" id="sat-id">{{ result.name }} · NORAD {{ result.norad_id }}</span></span></h2>
     <div class="status">
       <div class="countdown">
-        <div class="label">Next pass</div>
+        <div class="label" id="countdown-label">Next pass</div>
         {% if result.next_pass %}
-        <div class="t-minus"><small>T−</small>{{ result.next_pass.until }}</div>
-        <p>Rises <strong>{{ result.next_pass.rise_time }}</strong> {{ result.next_pass.rise_day }}, travelling {{ result.next_pass.direction }}.
+        <div class="t-minus" id="countdown"><small>T−</small>{{ result.next_pass.until }}</div>
+        <p id="next-text">Rises <strong>{{ result.next_pass.rise_time }}</strong> {{ result.next_pass.rise_day }}, travelling {{ result.next_pass.direction }}.
           Peaks at {{ result.next_pass.max_el }} and stays above the mask for {{ result.next_pass.duration }}.</p>
         {% else %}
         <div class="t-minus">None</div>
@@ -251,18 +261,18 @@
       <div class="readouts">
         <div class="readout">
           <div class="label">Elevation now</div>
-          <div class="v {% if result.visible %}live{% endif %}">{{ result.altitude }}</div>
-          <div class="d">{{ result.status | capitalize }}</div>
+          <div class="v {% if result.visible %}live{% endif %}" id="now-alt">{{ result.altitude }}</div>
+          <div class="d" id="now-status">{{ result.status | capitalize }}</div>
         </div>
         <div class="readout">
           <div class="label">Azimuth · range</div>
-          <div class="v">{{ result.azimuth }}</div>
-          <div class="d">{{ result.range_km }} km line of sight</div>
+          <div class="v" id="now-az">{{ result.azimuth }}</div>
+          <div class="d"><span id="now-range">{{ result.range_km }}</span> km line of sight</div>
         </div>
         <div class="readout">
           <div class="label">Directly below</div>
-          <div class="v">{{ result.sub_point }}</div>
-          <div class="d">{{ result.height_km }} km above Earth</div>
+          <div class="v" id="now-sub">{{ result.sub_point }}</div>
+          <div class="d"><span id="now-height">{{ result.height_km }}</span> km above Earth</div>
         </div>
         <div class="readout">
           <div class="label">Orbital elements</div>
@@ -324,6 +334,11 @@
           <text class="tag" x="{{ path.peak[0] + 5 }}" y="{{ path.peak[1] - 5 }}">{{ "%02d" | format(path.number) }}</text>
         </g>
         {% endfor %}
+        <g id="sky-now" hidden>
+          <circle class="now-ring" r="10"/>
+          <circle class="now-dot" r="5"/>
+          <text class="now-label" x="14" y="4">NOW</text>
+        </g>
       </svg>
       <div class="sky-legend"><span>○ rise point · dashed ring = {{ params.min_elevation }}° mask</span><span>Hover a pass to trace it</span></div>
     </section>
@@ -350,6 +365,9 @@
     </div>
   </footer>
 </div>
+{% if result %}
+<script type="application/json" id="live">{{ result.live | tojson }}</script>
+{% endif %}
 <script>
   // Fill in the visitor's coordinates and time zone from the browser (only when they click).
   document.getElementById("locate").addEventListener("click", () => {
@@ -371,6 +389,91 @@
     row.addEventListener("mouseenter", on); row.addEventListener("mouseleave", off);
     row.addEventListener("focus", on); row.addEventListener("blur", off);
   });
+
+  // Live display. The server sent SGP4 samples every 30 s across the window; between them we
+  // interpolate the satellite's east/north/up position relative to the station (smooth even
+  // through the zenith, unlike azimuth) and convert to elevation/azimuth/range each second.
+  // Pages opened for a window that doesn't contain "now" stay as rendered.
+  const liveData = document.getElementById("live");
+  if (liveData) {
+    const live = JSON.parse(liveData.textContent);
+    const endMs = live.start_ms + live.duration_s * 1000;
+    const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+    const $ = id => document.getElementById(id);
+    const rows = [...document.querySelectorAll("tbody tr[data-pass]")];
+    const paths = [...document.querySelectorAll("#skyplot .pass")];
+
+    const sampleAt = ms => {
+      const t = (ms - live.start_ms) / 1000;
+      const i = Math.min(Math.floor(t / live.step_s), live.samples.length - 2);
+      const t0 = i * live.step_s, t1 = Math.min((i + 1) * live.step_s, live.duration_s);
+      const f = (t - t0) / (t1 - t0), a = live.samples[i], b = live.samples[i + 1];
+      const mix = k => a[k] + (b[k] - a[k]) * f;
+      let lonB = b[1];  // longitude wraps at +/-180, so interpolate the short way round
+      if (lonB - a[1] > 180) lonB -= 360;
+      if (lonB - a[1] < -180) lonB += 360;
+      const lon = ((a[1] + (lonB - a[1]) * f + 540) % 360) - 180;
+      return { lat: mix(0), lon, height: mix(2), east: mix(3), north: mix(4), up: mix(5) };
+    };
+    const deg = r => r * 180 / Math.PI;
+    const hemi = (v, pos, neg) => `${Math.abs(v).toFixed(1)}° ${v >= 0 ? pos : neg}`;
+    const span = ms => {
+      const total = Math.max(0, Math.round(ms / 1000));
+      const h = Math.floor(total / 3600), m = Math.floor(total % 3600 / 60), s = total % 60;
+      return `${h}h ${String(m).padStart(2, "0")}m <span class="s">${String(s).padStart(2, "0")}s</span>`;
+    };
+
+    const tick = () => {
+      const now = Date.now();
+      if (now < live.start_ms || now > endMs) return;  // "now" isn't in this window
+      $("live-badge").hidden = false;
+
+      const p = sampleAt(now);
+      const range = Math.hypot(p.east, p.north, p.up);
+      const alt = deg(Math.asin(p.up / range));
+      const az = (deg(Math.atan2(p.east, p.north)) + 360) % 360;
+      const visible = alt >= live.mask_deg;
+      $("now-alt").textContent = `${alt.toFixed(1)}°`;
+      $("now-alt").classList.toggle("live", visible);
+      $("now-status").textContent = alt < 0 ? "Below the horizon"
+        : visible ? "Visible above the mask" : "Above the horizon, below the mask";
+      $("now-az").textContent = `${Math.round(az)}° (${COMPASS[Math.round(az / 45) % 8]})`;
+      $("now-range").textContent = Math.round(range).toLocaleString("en-US");
+      $("now-sub").textContent = `${hemi(p.lat, "N", "S")} ${hemi(p.lon, "E", "W")}`;
+      $("now-height").textContent = Math.round(p.height);
+
+      // Sky plot: show where to point while the satellite is above the horizon.
+      const dot = $("sky-now");
+      if (dot) {
+        dot.hidden = alt < 0;
+        const r = live.sky.R * (90 - Math.max(alt, 0)) / 90, a = az * Math.PI / 180;
+        dot.setAttribute("transform", `translate(${(live.sky.c + r * Math.sin(a)).toFixed(1)} ${(live.sky.c - r * Math.cos(a)).toFixed(1)})`);
+      }
+
+      // Countdown: to the current pass's set while in a pass, otherwise to the next rise.
+      const index = live.passes.findIndex(([, set]) => set > now);
+      rows.forEach((row, i) => row.classList.toggle("is-next", i === index));
+      paths.forEach((path, i) => path.classList.toggle("is-next", i === index));
+      const countdown = $("countdown");
+      if (!countdown) return;
+      if (index === -1) {
+        $("countdown-label").textContent = "Next pass";
+        countdown.textContent = "None";
+        return;
+      }
+      const [rise, set] = live.passes[index];
+      const inPass = now >= rise;
+      $("countdown-label").textContent = inPass ? `Pass ${String(index + 1).padStart(2, "0")} under way · sets in` : "Next pass";
+      countdown.innerHTML = `<small>${inPass ? "" : "T−"}</small>${span((inPass ? set : rise) - now)}`;
+      const cells = rows[index] ? rows[index].cells : null;
+      if (cells) {
+        $("next-text").innerHTML = `Pass ${cells[0].textContent}: rises <strong>${cells[2].textContent}</strong> on ${cells[1].textContent}, `
+          + `travelling ${cells[6].textContent}. Peaks at ${cells[5].textContent} and stays above the mask for ${cells[7].textContent}.`;
+      }
+    };
+    tick();
+    setInterval(tick, 1000);
+  }
 </script>
 </body>
 </html>
