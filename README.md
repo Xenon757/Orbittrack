@@ -96,11 +96,25 @@ set azimuths, and duration. Because the app is meant to face the public:
 
 ### Deploying
 
+The web app is deployed on Render's free plan at <https://orbittrack-dpeo.onrender.com>.
+
 `render.yaml` is a [Render](https://render.com) Blueprint for a free web service: it installs
 `requirements.txt`, starts uvicorn on Render's `$PORT`, and uses `/healthz` (which needs no
 orbital data) as the health check. `.python-version` pins Python 3.12. On Render's free plan
 the service sleeps after 15 minutes without traffic and takes about a minute to wake, and its
 disk is wiped on restart, so the first request after waking downloads fresh TLEs.
+
+**TLE mirror.** Requests from Render's network to CelesTrak time out, so the deployed app
+doesn't download from CelesTrak directly. Instead, `.github/workflows/tle-mirror.yml` runs on
+GitHub Actions every 6 hours, downloads the six allowed groups from CelesTrak, checks each file
+contains TLE data, and publishes them to GitHub Pages
+(<https://xenon757.github.io/Orbittrack/>). If any download fails, nothing is published and the
+previous files stay up. The web app reads its source from the `ORBITTRACK_TLE_URL` environment
+variable (a URL with a `{group}` placeholder, defaulting to CelesTrak), which `render.yaml` sets
+to the mirror. The CLI always downloads from CelesTrak.
+
+After a failed download the web app waits 5 minutes before retrying that group, answering 503
+immediately in the meantime, and logs the reason.
 
 ### Example output
 
@@ -171,7 +185,8 @@ Next contact: #1 ISS (ZARYA) over West Lafayette, IN at 2026-10-18 13:06:50 UTC 
 | `groundtrack.py` | Ground-track sampling, antimeridian splitting, and the station's coverage circle |
 | `mapview.py` | Folium map rendering |
 | `cli.py` | Argument parsing, validation, and table output |
-| `web.py`, `templates/` | FastAPI routes (`/`, `/map`, `/api/passes`), parameter validation, shared TLE cache |
+| `web.py`, `templates/` | FastAPI routes (`/`, `/map`, `/api/passes`, `/healthz`), parameter validation, shared TLE cache |
+| `.github/workflows/tle-mirror.yml` | Scheduled GitHub Actions job that mirrors the web app's TLE groups to GitHub Pages |
 
 Key details:
 
@@ -194,7 +209,7 @@ Key details:
 pytest
 ```
 
-107 tests, all offline. They use a real CelesTrak TLE file from 2026-10-18 checked into
+115 tests, all offline. They use a real CelesTrak TLE file from 2026-10-18 checked into
 `tests/fixtures/` and fixed start times, so results are deterministic. CLI tests fail if
 anything tries to download, and web tests swap in the fixture through FastAPI's dependency
 overrides. The tests include:
@@ -215,7 +230,9 @@ overrides. The tests include:
 - **CLI and map**: options, input validation, schedule output, and generated map content.
 - **Web app**: the API returns the same passes as the core code; the page, map and error pages
   render; bad parameters (including disallowed groups) get 422; visitor input is HTML-escaped;
-  an outage gives 503; and the shared cache parses a file once until it changes.
+  an outage gives 503 and is not retried for 5 minutes; the configured TLE source URL is used;
+  the shared cache parses a file once until it changes; and the mirror workflow's group list
+  matches the app's allowed groups.
 
 ## Limitations
 
@@ -224,6 +241,8 @@ overrides. The tests include:
 - The map supports one satellite and one station.
 - The web app handles one satellite and one station per request; multi-satellite contact
   scheduling is CLI-only.
+- The deployed site's TLEs come from the mirror, so they can be up to about 6 hours behind
+  CelesTrak.
 - Contact scheduling ignores pass quality, priorities and antenna slew/setup time between contacts.
 - Atmospheric refraction is not modeled.
 - Accuracy is limited by SGP4 and the age of the TLE; always use fresh elements.
