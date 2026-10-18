@@ -2,14 +2,13 @@
 
 import re
 from datetime import timedelta, timezone
-from pathlib import Path
 
 import pytest
 
+from conftest import STATIONS_TLE
 from orbittrack import cli
 
-FIXTURE = str(Path(__file__).parent / "fixtures" / "stations_2026-10-18.tle")
-BASE_ARGS = ["--tle-file", FIXTURE, "--start", "2026-10-18T12:00"]
+BASE_ARGS = ["--tle-file", str(STATIONS_TLE), "--start", "2026-10-18T12:00"]
 PASS_ROW = re.compile(r"^\s+\d+\s+\d{4}-\d{2}-\d{2}\s", re.MULTILINE)
 
 

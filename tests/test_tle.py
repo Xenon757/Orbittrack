@@ -3,19 +3,15 @@
 import os
 import time
 import urllib.request
-from pathlib import Path
 
 import pytest
 from skyfield.api import load
 
 from orbittrack.tle import fetch_tle_file, find_satellite, load_satellites, tle_age_days
 
-FIXTURE = Path(__file__).parent / "fixtures" / "stations_2026-10-18.tle"
-
-
 @pytest.fixture
-def satellites():
-    return load_satellites(FIXTURE)
+def satellites(tle_path):
+    return load_satellites(tle_path)
 
 
 def no_network(*args, **kwargs):
@@ -45,17 +41,17 @@ def test_tle_age_is_zero_at_epoch(satellites):
     assert tle_age_days(iss, load.timescale().utc(2026, 10, 20, 11, 12, 47)) == pytest.approx(2.0, abs=1e-3)
 
 
-def test_fresh_cache_is_used_without_downloading(tmp_path, monkeypatch):
+def test_fresh_cache_is_used_without_downloading(tle_path, tmp_path, monkeypatch):
     cached = tmp_path / "stations.tle"
-    cached.write_bytes(FIXTURE.read_bytes())
+    cached.write_bytes(tle_path.read_bytes())
     monkeypatch.setattr(urllib.request, "urlopen", no_network)
 
     assert fetch_tle_file("stations", cache_dir=tmp_path) == cached
 
 
-def test_stale_cache_is_used_if_download_fails(tmp_path, monkeypatch):
+def test_stale_cache_is_used_if_download_fails(tle_path, tmp_path, monkeypatch):
     cached = tmp_path / "stations.tle"
-    cached.write_bytes(FIXTURE.read_bytes())
+    cached.write_bytes(tle_path.read_bytes())
     ten_hours_ago = time.time() - 10 * 3600
     os.utime(cached, (ten_hours_ago, ten_hours_ago))
     monkeypatch.setattr(urllib.request, "urlopen", no_network)

@@ -5,21 +5,11 @@ a station directly under the satellite sees it straight overhead, and a station 
 opposite side of the Earth sees it straight below.
 """
 
-from pathlib import Path
-
 import pytest
 from skyfield.api import load
 
 from orbittrack.observe import look_angles, sub_point
 from orbittrack.station import WEST_LAFAYETTE, GroundStation
-from orbittrack.tle import find_satellite, load_satellites
-
-FIXTURE = Path(__file__).parent / "fixtures" / "stations_2026-10-18.tle"
-
-
-@pytest.fixture
-def iss():
-    return find_satellite(load_satellites(FIXTURE), "25544")
 
 
 @pytest.fixture

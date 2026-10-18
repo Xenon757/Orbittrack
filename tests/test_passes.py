@@ -2,7 +2,6 @@
 
 from dataclasses import replace
 from datetime import timedelta
-from pathlib import Path
 
 import pytest
 from skyfield.api import load
@@ -10,17 +9,10 @@ from skyfield.api import load
 from orbittrack.observe import look_angles
 from orbittrack.passes import CULMINATE, RISE, SET, compass_direction, find_passes, group_into_passes
 from orbittrack.station import WEST_LAFAYETTE
-from orbittrack.tle import find_satellite, load_satellites
 
-FIXTURE = Path(__file__).parent / "fixtures" / "stations_2026-10-18.tle"
 ts = load.timescale()
 START = ts.utc(2026, 10, 18, 12, 0, 0)  # about an hour after the fixture's TLE epoch
 HOURS = 24.0
-
-
-@pytest.fixture(scope="module")
-def iss():
-    return find_satellite(load_satellites(FIXTURE), "25544")
 
 
 @pytest.fixture(scope="module")
