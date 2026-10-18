@@ -23,7 +23,7 @@ from orbittrack.observe import look_angles, sub_point
 from orbittrack.passes import Pass, compass_direction, find_passes
 from orbittrack.schedule import Conflict, Contact, find_contacts, next_contact, schedule_contacts
 from orbittrack.station import WEST_LAFAYETTE, GroundStation
-from orbittrack.tle import fetch_tle_file, find_satellite, load_satellites, tle_age_days
+from orbittrack.tle import fetch_tle_file, load_satellites, lookup_satellite, tle_age_days
 
 
 # --- argument types: reject bad input with a clear message instead of a traceback ---
@@ -135,16 +135,6 @@ def stations_from_args(args: argparse.Namespace) -> list[GroundStation]:
         stations = [WEST_LAFAYETTE]
     # Stations are frozen (immutable), so make copies with the user's mask and time zone.
     return [replace(s, min_elevation_deg=args.min_elevation, timezone=args.tz or s.timezone) for s in stations]
-
-
-def lookup_satellite(satellites: list[EarthSatellite], query: str) -> EarthSatellite:
-    """find_satellite(), but on a miss suggest names that contain the query (e.g. "ISS")."""
-    try:
-        return find_satellite(satellites, query)
-    except LookupError:
-        close = [s.name.strip() for s in satellites if query.strip().upper() in s.name.upper()]
-        hint = f" Did you mean: {', '.join(close[:5])}?" if close else ""
-        raise LookupError(f"no satellite matching {query!r} in this TLE set.{hint}")
 
 
 # --- output ---

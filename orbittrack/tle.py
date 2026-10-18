@@ -79,6 +79,16 @@ def find_satellite(satellites: list[EarthSatellite], query: str) -> EarthSatelli
     return matches[0]
 
 
+def lookup_satellite(satellites: list[EarthSatellite], query: str) -> EarthSatellite:
+    """find_satellite(), but on a miss suggest names that contain the query (e.g. "ISS")."""
+    try:
+        return find_satellite(satellites, query)
+    except LookupError:
+        close = [s.name.strip() for s in satellites if query.strip().upper() in s.name.upper()]
+        hint = f" Did you mean: {', '.join(close[:5])}?" if close else ""
+        raise LookupError(f"no satellite matching {query!r} in this TLE set.{hint}")
+
+
 def tle_age_days(satellite: EarthSatellite, t: Time) -> float:
     """How many days `t` is from the TLE epoch. SGP4 error grows the further we get from it."""
     return float(t - satellite.epoch)
