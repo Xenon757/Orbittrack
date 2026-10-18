@@ -5,7 +5,7 @@ from datetime import timedelta
 import pytest
 from skyfield.api import load
 
-from orbittrack.mapview import PASS_COLOR, build_map
+from orbittrack.mapview import PASS_COLOR, TRAIL_COLOR, build_map
 from orbittrack.passes import find_passes
 from orbittrack.station import WEST_LAFAYETTE
 
@@ -52,4 +52,5 @@ def test_map_animates_the_marker_from_the_track_samples(page):
     # The script moves the satellite marker along the same 30-second samples as the drawn track.
     assert "setLatLng" in page and "predicted position now" in page
     assert '"times_ms": [' in page
-    assert "trail.setLatLngs" in page and f'color: "{PASS_COLOR}"' in page  # red trail behind the marker
+    assert "trail.setLatLngs" in page and f'color: "{TRAIL_COLOR}"' in page  # blue trail behind the marker
+    assert "flown so far" in page  # and it's in the legend

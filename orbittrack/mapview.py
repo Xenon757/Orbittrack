@@ -17,6 +17,9 @@ INK = "#141414"
 PAPER = "#F2F0EB"
 TRACK_COLOR = INK
 PASS_COLOR = "#D9381E"
+# The part of the track already flown. Blue rather than green: red/green is the pair that
+# red-green colour blindness (the most common kind) can't tell apart.
+TRAIL_COLOR = "#2B6CDF"
 STATION_COLOR = INK
 
 # Monochrome tiles (keeps OpenStreetMap's attribution, drops its colors so the data stands out),
@@ -34,6 +37,7 @@ MAP_STYLE = f"""
     background: {INK}; color: {PAPER}; padding: 6px 10px; font: 700 11px/1.3 "Archivo", Arial, sans-serif;
     letter-spacing: 0.1em; text-transform: uppercase; }}
   .ot-title b {{ color: {PASS_COLOR}; }}
+  .ot-title i {{ color: {TRAIL_COLOR}; font-style: normal; }}
 </style>
 """
 
@@ -123,19 +127,19 @@ def build_map(
 
     # While "now" falls inside the window, glide the marker to the predicted position every
     # second by interpolating between the 30-second track samples computed above, leaving a
-    # red trail along the part of the track already flown.
+    # blue trail along the part of the track already flown.
     live = {
         "start_ms": round(track[0].time.timestamp() * 1000),
         "times_ms": [round(q.time.timestamp() * 1000) for q in track],
         "points": [[round(q.latitude_deg, 3), round(q.longitude_deg, 3)] for q in track],
         "label": f"{sat_name} · predicted position now",
     }
-    script = LIVE_MARKER_JS % {"map": fmap.get_name(), "marker": marker.get_name(), "live": json.dumps(live), "color": PASS_COLOR}
+    script = LIVE_MARKER_JS % {"map": fmap.get_name(), "marker": marker.get_name(), "live": json.dumps(live), "color": TRAIL_COLOR}
     fmap.get_root().script.add_child(folium.Element(script))
 
     title = (f"{sat_name} ground track, {track[0].time.astimezone(zone):%Y-%m-%d %H:%M} to "
              f"{track[-1].time.astimezone(zone):%Y-%m-%d %H:%M %Z} &middot; "
-             f"<b>&#9644; passes over {html.escape(station.name)}</b>")
+             f"<b>&#9644; passes over {html.escape(station.name)}</b> &middot; <i>&#9644; flown so far</i>")
     fmap.get_root().header.add_child(folium.Element(MAP_STYLE))
     fmap.get_root().html.add_child(folium.Element(f"<div class='ot-title'>{title}</div>"))
     return fmap
