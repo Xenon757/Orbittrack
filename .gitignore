@@ -10,8 +10,9 @@ cache/
 *.tle
 !tests/fixtures/*.tle
 
-# Generated maps
+# Generated maps (but not the web app's page templates)
 *.html
+!orbittrack/templates/*.html
 
 # macOS
 .DS_Store
