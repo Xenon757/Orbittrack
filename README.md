@@ -3,8 +3,8 @@
 A command-line satellite pass predictor for a ground station. It downloads current orbital
 elements (TLEs) from [CelesTrak](https://celestrak.org), propagates them with SGP4, and
 predicts when satellites rise above, peak over, and set below a station's elevation mask.
-It can also schedule contacts across several satellites and stations, and draw a satellite's
-ground track on an interactive map.
+It can also schedule contacts across several satellites and stations, draw a satellite's
+ground track on an interactive map, and serve predictions through a small web app and JSON API.
 
 ## Features
 
@@ -20,6 +20,8 @@ ground track on an interactive map.
   satellite at a time), and reports the next scheduled contact.
 - **Ground-track map**: an HTML map (folium / Leaflet) showing the ground track, the station's
   coverage circle, each predicted pass, and the satellite's position at the start time.
+- **Web app**: a FastAPI site with a prediction form, the pass table, the embedded map, and the
+  same data as JSON at `/api/passes` (interactive API docs at `/docs`).
 - **Polite data handling**: TLE downloads are cached locally for 6 hours; if a download fails,
   a stale cached copy is used with a warning.
 
@@ -61,6 +63,36 @@ python -m orbittrack.cli --sat 25544 --sat "CSS (TIANHE)" \
 Invalid input (out-of-range coordinates, unknown time zones, malformed times or stations)
 is rejected with a usage error. An unknown satellite name suggests close matches, e.g.
 `--sat "NOAA 20"` suggests `NOAA 20 (JPSS-1)`.
+
+### Web app
+
+```bash
+uvicorn orbittrack.web:app --reload
+```
+
+Then open <http://localhost:8000>. The page has a form for the satellite, CelesTrak group,
+station location, time window and mask (plus a "Use my location" button that fills in the
+browser's coordinates and time zone), and shows the current position, next pass, pass table and
+ground-track map. Every parameter is in the URL, so results can be bookmarked or shared.
+
+The same parameters work on the JSON endpoint:
+
+```bash
+curl "http://localhost:8000/api/passes?sat=25544&lat=40.4237&lon=-86.9212&hours=24"
+```
+
+It returns the satellite and TLE age, the station, the current look angles and sub-satellite
+point, and each pass with UTC ISO 8601 rise / culmination / set times, max elevation, rise and
+set azimuths, and duration. Because the app is meant to face the public:
+
+- Only six CelesTrak groups are accepted (`stations`, `visual`, `weather`, `amateur`, `science`,
+  `gps-ops`). The group name becomes part of a cache file path and a CelesTrak request, so free
+  text could be used for path tricks or to make the server spam CelesTrak.
+- Parameters are range-checked (a bad value gets HTTP 422), and the window is capped at 72 hours.
+- All visitors share one TLE cache. A lock ensures only one request re-downloads a stale file,
+  and each file is parsed once and reused until it changes.
+- An unknown satellite returns 404 with name suggestions; a failed download with nothing
+  cached returns 503.
 
 ### Example output
 
@@ -131,6 +163,7 @@ Next contact: #1 ISS (ZARYA) over West Lafayette, IN at 2026-10-18 13:06:50 UTC 
 | `groundtrack.py` | Ground-track sampling, antimeridian splitting, and the station's coverage circle |
 | `mapview.py` | Folium map rendering |
 | `cli.py` | Argument parsing, validation, and table output |
+| `web.py`, `templates/` | FastAPI routes (`/`, `/map`, `/api/passes`), parameter validation, shared TLE cache |
 
 Key details:
 
@@ -153,9 +186,10 @@ Key details:
 pytest
 ```
 
-87 tests, all offline. They use a real CelesTrak TLE file from 2026-10-18 checked into
+107 tests, all offline. They use a real CelesTrak TLE file from 2026-10-18 checked into
 `tests/fixtures/` and fixed start times, so results are deterministic. CLI tests fail if
-anything tries to download. The tests include:
+anything tries to download, and web tests swap in the fixture through FastAPI's dependency
+overrides. The tests include:
 
 - **Independent cross-check**: pass predictions are compared against brute-force altitude
   sampling every 2 s over 48 h at 0°, 10° and 30° masks: same pass count, times within 3 s,
@@ -171,12 +205,17 @@ anything tries to download. The tests include:
 - **Scheduling**: conflict rules on synthetic contacts, and a comparison against brute force
   over all subsets confirming the greedy schedule is as large as possible.
 - **CLI and map**: options, input validation, schedule output, and generated map content.
+- **Web app**: the API returns the same passes as the core code; the page, map and error pages
+  render; bad parameters (including disallowed groups) get 422; visitor input is HTML-escaped;
+  an outage gives 503; and the shared cache parses a file once until it changes.
 
 ## Limitations
 
 - One CelesTrak group (or one TLE file) per run, so satellites from different groups can't be
   mixed in one schedule.
 - The map supports one satellite and one station.
+- The web app handles one satellite and one station per request; multi-satellite contact
+  scheduling is CLI-only. It is set up to run locally and is not deployed anywhere.
 - Contact scheduling ignores pass quality, priorities and antenna slew/setup time between contacts.
 - Atmospheric refraction is not modeled.
 - Accuracy is limited by SGP4 and the age of the TLE; always use fresh elements.
