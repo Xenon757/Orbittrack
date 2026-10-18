@@ -4,19 +4,21 @@ Examples:
     python -m orbittrack.cli
     python -m orbittrack.cli --sat "CSS (TIANHE)" --hours 48 --min-elevation 20
     python -m orbittrack.cli --sat 25544 --lat 51.48 --lon -0.0 --tz Europe/London
+    python -m orbittrack.cli --hours 6 --map iss_track.html
 """
 
 import argparse
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from skyfield.api import EarthSatellite, load
 from skyfield.timelib import Time
 
+from orbittrack.mapview import build_map
 from orbittrack.observe import look_angles, sub_point
-from orbittrack.passes import compass_direction, find_passes
+from orbittrack.passes import Pass, compass_direction, find_passes
 from orbittrack.station import WEST_LAFAYETTE, GroundStation
 from orbittrack.tle import fetch_tle_file, find_satellite, load_satellites, tle_age_days
 
@@ -85,6 +87,10 @@ def build_parser() -> argparse.ArgumentParser:
     window.add_argument("--hours", type=positive_float, default=24.0, help="length of the search window (default: 24)")
     window.add_argument("--min-elevation", type=bounded_float("minimum elevation", 0, 89), default=10.0,
                         help="elevation mask in degrees (default: 10)")
+
+    output = parser.add_argument_group("output")
+    output.add_argument("--map", type=Path, metavar="FILE",
+                        help="also save an interactive ground-track map of the search window to this HTML file")
     return parser
 
 
@@ -141,8 +147,7 @@ def print_current_position(satellite: EarthSatellite, station: GroundStation, t:
           f"at {below.height_km:.0f} km above Earth")
 
 
-def print_passes(satellite: EarthSatellite, station: GroundStation, t: Time, hours: float) -> None:
-    passes = find_passes(satellite, station, t, hours)
+def print_passes(passes: list[Pass], station: GroundStation, hours: float) -> None:
     zone = station.local_zone()
 
     print(f"Passes above {station.min_elevation_deg:g}° in the next {hours:g} h "
@@ -180,9 +185,16 @@ def main(argv: list[str] | None = None) -> None:
     ts = load.timescale()
     t = ts.from_datetime(args.start) if args.start else ts.now()
 
+    passes = find_passes(satellite, station, t, args.hours)
+
     print_current_position(satellite, station, t)
     print()
-    print_passes(satellite, station, t, args.hours)
+    print_passes(passes, station, args.hours)
+
+    if args.map:
+        build_map(satellite, station, t, t + timedelta(hours=args.hours), passes).save(str(args.map))
+        print()
+        print(f"Map saved to {args.map.resolve()}")
 
 
 if __name__ == "__main__":
