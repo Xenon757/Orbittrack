@@ -298,3 +298,9 @@ def test_page_embeds_live_samples_as_json(client):
 def test_responses_are_gzipped_when_the_browser_accepts_it(client):
     response = client.get("/", params=FIXED, headers={"Accept-Encoding": "gzip"})
     assert response.headers.get("content-encoding") == "gzip"
+
+
+def test_page_covers_the_map_with_a_loading_screen_until_it_is_ready(client):
+    page = client.get("/", params=FIXED).text
+    assert 'id="map-loading"' in page and 'class="map-loading"' in page  # visible until told otherwise
+    assert '"orbittrack-map-ready"' in page and "event.origin === location.origin" in page

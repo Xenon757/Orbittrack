@@ -144,6 +144,16 @@
 
     /* 05 Ground track */
     .mapframe { display: block; width: 100%; height: clamp(360px, 52vw, 560px); border: 0; border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); background: var(--field); }
+    .mapwrap { position: relative; }
+    .map-loading { position: absolute; inset: 2px 0; display: grid; place-content: center; justify-items: start; gap: 12px;
+      background: var(--field); transition: opacity 200ms ease-out; }
+    .map-loading.is-done { opacity: 0; pointer-events: none; }
+    .map-loading .what { font-weight: 800; font-stretch: 80%; font-size: clamp(1.5rem, 3vw, 2.25rem); line-height: 1; }
+    .map-loading .meter { width: min(320px, 60vw); height: 3px; background: var(--rule); overflow: hidden; }
+    .map-loading .meter span { display: block; width: 30%; height: 100%; background: var(--signal); animation: map-sweep 1.1s linear infinite; }
+    .map-loading .hint { color: var(--graphite); font-size: 0.875rem; max-width: 46ch; min-height: 1.5em; }
+    @keyframes map-sweep { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+    @media (prefers-reduced-motion: reduce) { .map-loading .meter span { animation: none; width: 100%; opacity: 0.5; } }
 
     /* Colophon */
     .colophon { margin-top: calc(var(--grid) * 8); padding-top: 16px; border-top: 3px solid var(--ink);
@@ -346,7 +356,15 @@
 
   <section class="section" aria-labelledby="s-track">
     <h2 class="bar" id="s-track"><span class="no">05</span> Ground track <span class="aside">Next {{ params.hours }} h</span></h2>
-    <iframe class="mapframe" src="/map?{{ map_query }}" title="Ground track map"></iframe>
+    <div class="mapwrap">
+      <iframe class="mapframe" id="mapframe" src="/map?{{ map_query }}" title="Ground track map"></iframe>
+      <div class="map-loading" id="map-loading" role="status" aria-live="polite">
+        <div class="label">05 · Ground track</div>
+        <div class="what">Plotting the next {{ params.hours }} h</div>
+        <div class="meter" aria-hidden="true"><span></span></div>
+        <div class="hint" id="map-loading-hint">Propagating the orbit and fetching map tiles.</div>
+      </div>
+    </div>
   </section>
   {% endif %}
 
@@ -389,6 +407,24 @@
     row.addEventListener("mouseenter", on); row.addEventListener("mouseleave", off);
     row.addEventListener("focus", on); row.addEventListener("blur", off);
   });
+
+  // Map loading screen. The iframe's own load event fires before Leaflet has fetched the map
+  // tiles, so the map page posts "orbittrack-map-ready" once its visible tiles are in. Safety nets:
+  // a reassurance note after 10 s, and the overlay always clears 12 s after the frame loads.
+  const mapFrame = document.getElementById("mapframe");
+  const mapLoading = document.getElementById("map-loading");
+  if (mapFrame && mapLoading) {
+    const done = () => mapLoading.classList.add("is-done");
+    window.addEventListener("message", event => {
+      if (event.origin === location.origin && event.source === mapFrame.contentWindow && event.data === "orbittrack-map-ready") done();
+    });
+    mapFrame.addEventListener("load", () => setTimeout(done, 12000));
+    setTimeout(() => {
+      if (!mapLoading.classList.contains("is-done")) {
+        document.getElementById("map-loading-hint").textContent = "Still loading. Map tiles can be slow on a cold start; it'll appear here on its own.";
+      }
+    }, 10000);
+  }
 
   // Live display. The server sent SGP4 samples every 30 s across the window; between them we
   // interpolate the satellite's east/north/up position relative to the station (smooth even
