@@ -79,6 +79,16 @@ window.addEventListener("load", function () {
 """
 
 
+MAP_READY_JS = """
+window.addEventListener("load", function () {
+  // Tell an embedding page (the web app's loading screen) when the visible tiles are in.
+  var tiles = %(tiles)s;
+  function ready() { if (window.parent !== window) window.parent.postMessage("orbittrack-map-ready", "*"); }
+  if (tiles.isLoading()) tiles.once("load", ready); else ready();
+});
+"""
+
+
 def build_map(
     satellite: EarthSatellite, station: GroundStation, start: Time, end: Time, passes: list[Pass]
 ) -> folium.Map:
@@ -141,5 +151,7 @@ def build_map(
              f"{track[-1].time.astimezone(zone):%Y-%m-%d %H:%M %Z} &middot; "
              f"<b>&#9644; passes over {html.escape(station.name)}</b> &middot; <i>&#9644; flown so far</i>")
     fmap.get_root().header.add_child(folium.Element(MAP_STYLE))
+    tile_layer = next(child for child in fmap._children.values() if isinstance(child, folium.TileLayer))
+    fmap.get_root().script.add_child(folium.Element(MAP_READY_JS % {"tiles": tile_layer.get_name()}))
     fmap.get_root().html.add_child(folium.Element(f"<div class='ot-title'>{title}</div>"))
     return fmap

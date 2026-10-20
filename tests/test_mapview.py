@@ -54,3 +54,7 @@ def test_map_animates_the_marker_from_the_track_samples(page):
     assert '"times_ms": [' in page
     assert "trail.setLatLngs" in page and f'color: "{TRAIL_COLOR}"' in page  # blue trail behind the marker
     assert "flown so far" in page  # and it's in the legend
+
+
+def test_map_tells_the_embedding_page_when_tiles_are_loaded(page):
+    assert 'postMessage("orbittrack-map-ready"' in page and ".isLoading()" in page
