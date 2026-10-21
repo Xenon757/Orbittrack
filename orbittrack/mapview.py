@@ -100,6 +100,10 @@ def build_map(
     zone = station.local_zone()
     sat_name = html.escape(satellite.name.strip())
     fmap = folium.Map(location=[station.latitude_deg, station.longitude_deg], zoom_start=3, tiles="OpenStreetMap")
+    # get_root() is typed as a plain Element, but a Map's root is always the Figure (the HTML page)
+    # that holds the header, body and script sections we add to below.
+    root = fmap.get_root()
+    assert isinstance(root, folium.Figure)
 
     track = ground_track(satellite, start, end)
     for segment in split_at_antimeridian(track):
@@ -145,13 +149,13 @@ def build_map(
         "label": f"{sat_name} · predicted position now",
     }
     script = LIVE_MARKER_JS % {"map": fmap.get_name(), "marker": marker.get_name(), "live": json.dumps(live), "color": TRAIL_COLOR}
-    fmap.get_root().script.add_child(folium.Element(script))
+    root.script.add_child(folium.Element(script))
 
     title = (f"{sat_name} ground track, {track[0].time.astimezone(zone):%Y-%m-%d %H:%M} to "
              f"{track[-1].time.astimezone(zone):%Y-%m-%d %H:%M %Z} &middot; "
              f"<b>&#9644; passes over {html.escape(station.name)}</b> &middot; <i>&#9644; flown so far</i>")
-    fmap.get_root().header.add_child(folium.Element(MAP_STYLE))
+    root.header.add_child(folium.Element(MAP_STYLE))
     tile_layer = next(child for child in fmap._children.values() if isinstance(child, folium.TileLayer))
-    fmap.get_root().script.add_child(folium.Element(MAP_READY_JS % {"tiles": tile_layer.get_name()}))
-    fmap.get_root().html.add_child(folium.Element(f"<div class='ot-title'>{title}</div>"))
+    root.script.add_child(folium.Element(MAP_READY_JS % {"tiles": tile_layer.get_name()}))
+    root.html.add_child(folium.Element(f"<div class='ot-title'>{title}</div>"))
     return fmap

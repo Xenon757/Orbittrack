@@ -1,3 +1,15 @@
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["orbittrack"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+# Skyfield ships no type hints, so values from it are treated as untyped (Any).
+# Everything in our own code is still checked.
+[[tool.mypy.overrides]]
+module = ["skyfield.*"]
+ignore_missing_imports = true
