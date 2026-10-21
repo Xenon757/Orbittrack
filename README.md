@@ -188,6 +188,43 @@ Scheduled 9 of 13 contacts; 4 dropped because the station was already busy.
 Next contact: #1 ISS (ZARYA) over West Lafayette, IN at 2026-10-18 13:06:50 UTC (in 1h 07m), max 12.6°
 ```
 
+## Accuracy check against NASA's ISS ephemeris
+
+`orbittrack/accuracy.py` compares SGP4/TLE predictions with the ISS trajectory published by
+NASA JSC's trajectory operations office (CCSDS OEM format, EME2000 frame, a state vector every
+4 minutes for about 15 days):
+
+```bash
+curl -O https://nasa-public-data.s3.amazonaws.com/iss-coords/current/ISS_OEM/ISS.OEM_J2K_EPH.txt
+python -m orbittrack.accuracy --oem ISS.OEM_J2K_EPH.txt            # current CelesTrak TLE
+python -m orbittrack.accuracy --oem ISS.OEM_J2K_EPH.txt --tle-file tests/fixtures/stations_2026-10-18.tle
+```
+
+It splits the position difference into along-track, cross-track and radial parts, and converts
+the along-track part into a timing error (along-track km ÷ speed).
+
+Results against the ephemeris published 2026-10-21 (starting 12:00 UTC):
+
+| TLE | TLE age at OEM start | Difference at OEM start | 7 days later | 14 days later |
+|---|---|---|---|---|
+| CelesTrak, epoch 2026-10-21 01:09 UTC | 0.45 days | 0.98 km (+0.12 s) | 15.5 km | 97.0 km |
+| CelesTrak, epoch 2026-10-18 11:13 UTC (test fixture) | 3.03 days | 0.80 km (−0.09 s) | 46.2 km | 113.5 km |
+
+How to read it:
+
+- **The OEM-start column is a measurement.** NASA's state there comes from recent tracking.
+  Both TLEs, including one that was 3 days old, were within 1 km of it, about 0.1 s of
+  along-track timing.
+- **The later columns compare against NASA's forecast,** so they show SGP4 and NASA's
+  high-fidelity model drifting apart (mostly over future drag), including NASA's own forecast
+  uncertainty. They aren't a pure measurement of TLE error.
+- **Over the full 15 days, 99.9% of the squared difference is along-track** (for both TLEs).
+  Cross-track peaks at 3.7 km and radial at 1.7 km, against about 100 km along-track by the end:
+  the ISS is in the right place on its orbit, just early or late. Over the first day alone, when the whole difference is only 1–3 km,
+  the along-track share is 93.5%.
+- This is two TLEs against one ephemeris, not a statistical study. Comparing more TLEs against
+  successive daily OEMs would give a proper error-versus-age curve.
+
 ## How it works
 
 | Module | Responsibility |
@@ -200,6 +237,7 @@ Next contact: #1 ISS (ZARYA) over West Lafayette, IN at 2026-10-18 13:06:50 UTC 
 | `groundtrack.py` | Ground-track sampling, antimeridian splitting, and the station's coverage circle |
 | `mapview.py` | Folium map rendering |
 | `cli.py` | Argument parsing, validation, and table output |
+| `accuracy.py` | Parse NASA OEM ephemerides and compare SGP4/TLE predictions against them (radial / along-track / cross-track) |
 | `web.py`, `templates/` | FastAPI routes (`/`, `/map`, `/api/passes`, `/healthz`), parameter validation, shared TLE cache |
 | `.github/workflows/tle-mirror.yml` | Scheduled GitHub Actions job that mirrors the web app's TLE groups to GitHub Pages |
 
@@ -229,7 +267,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs both on every push and pull req
 mypy checks all of `orbittrack/`; Skyfield ships no type hints, so values from it are
 treated as untyped.
 
-125 tests, all offline. They use a real CelesTrak TLE file from 2026-10-18 checked into
+135 tests, all offline. They use a real CelesTrak TLE file from 2026-10-18 checked into
 `tests/fixtures/` and fixed start times, so results are deterministic. CLI tests fail if
 anything tries to download, and web tests swap in the fixture through FastAPI's dependency
 overrides. The tests include:
@@ -248,6 +286,9 @@ overrides. The tests include:
 - **Scheduling**: conflict rules on synthetic contacts, and a comparison against brute force
   over all subsets confirming the greedy schedule is as large as possible.
 - **CLI and map**: options, input validation, schedule output, and generated map content.
+- **Accuracy check**: OEM parsing (including covariance blocks and frame validation), the
+  radial / along-track / cross-track frame, and SGP4 vs NASA on a one-day slice of a real NASA
+  ephemeris (0.80 km at the start, mostly along-track).
 - **Web app**: the API returns the same passes as the core code; the page, map and error pages
   render; bad parameters (including disallowed groups) get 422; visitor input is HTML-escaped;
   an outage gives 503 and is not retried for 5 minutes; the configured TLE source URL is used;
