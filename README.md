@@ -1,5 +1,7 @@
 # OrbitTrack
 
+[![CI](https://github.com/Xenon757/Orbittrack/actions/workflows/ci.yml/badge.svg)](https://github.com/Xenon757/Orbittrack/actions/workflows/ci.yml)
+
 > Developed locally since 2025; this repository was created in 2026 to deploy the project as a live site.
 
 A command-line satellite pass predictor for a ground station. It downloads current orbital
@@ -220,9 +222,14 @@ Key details:
 
 ```bash
 pytest
+mypy
 ```
 
-123 tests, all offline. They use a real CelesTrak TLE file from 2026-10-18 checked into
+GitHub Actions (`.github/workflows/ci.yml`) runs both on every push and pull request.
+mypy checks all of `orbittrack/`; Skyfield ships no type hints, so values from it are
+treated as untyped.
+
+125 tests, all offline. They use a real CelesTrak TLE file from 2026-10-18 checked into
 `tests/fixtures/` and fixed start times, so results are deterministic. CLI tests fail if
 anything tries to download, and web tests swap in the fixture through FastAPI's dependency
 overrides. The tests include:
