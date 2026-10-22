@@ -24,6 +24,11 @@ ground track on an interactive map, and serve predictions through a small web ap
   satellite at a time), and reports the next scheduled contact.
 - **Ground-track map**: an HTML map (folium / Leaflet) showing the ground track, the station's
   coverage circle, each predicted pass, and the satellite's position at the start time.
+- **Per-pass detail**: each pass has its own page (linked from the pass table) with the radio
+  Doppler shift through the pass for a chosen downlink frequency (default 145.800 MHz, the ISS
+  voice downlink), the elevation profile, the pass's path on a sky plot, the peak antenna
+  azimuth rate (flagging fast "keyhole" swings on near-overhead passes), and a downloadable
+  pointing file: azimuth, elevation, range, range rate, Doppler and tuning frequency every second.
 - **Web app**: a FastAPI site with a prediction form, the pass table, a polar sky plot of each
   pass's path, the embedded map, and the same data as JSON at `/api/passes` (interactive API docs
   at `/docs`). While the current time is inside the search window, the page shows the
@@ -237,8 +242,9 @@ How to read it:
 | `groundtrack.py` | Ground-track sampling, antimeridian splitting, and the station's coverage circle |
 | `mapview.py` | Folium map rendering |
 | `cli.py` | Argument parsing, validation, and table output |
+| `pointing.py` | Per-pass profile sampled every second: azimuth/elevation, range, range rate (line-of-sight speed), Doppler shift, azimuth rate, CSV export |
 | `accuracy.py` | Parse NASA OEM ephemerides and compare SGP4/TLE predictions against them (radial / along-track / cross-track) |
-| `web.py`, `templates/` | FastAPI routes (`/`, `/map`, `/api/passes`, `/healthz`), parameter validation, shared TLE cache |
+| `web.py`, `templates/` | FastAPI routes (`/`, `/pass/{n}`, `/pass/{n}/pointing.csv`, `/map`, `/api/passes`, `/healthz`), parameter validation, shared TLE cache |
 | `.github/workflows/tle-mirror.yml` | Scheduled GitHub Actions job that mirrors the web app's TLE groups to GitHub Pages |
 
 Key details:
@@ -267,7 +273,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs both on every push and pull req
 mypy checks all of `orbittrack/`; Skyfield ships no type hints, so values from it are
 treated as untyped.
 
-135 tests, all offline. They use a real CelesTrak TLE file from 2026-10-18 checked into
+152 tests, all offline. They use a real CelesTrak TLE file from 2026-10-18 checked into
 `tests/fixtures/` and fixed start times, so results are deterministic. CLI tests fail if
 anything tries to download, and web tests swap in the fixture through FastAPI's dependency
 overrides. The tests include:
@@ -286,6 +292,10 @@ overrides. The tests include:
 - **Scheduling**: conflict rules on synthetic contacts, and a comparison against brute force
   over all subsets confirming the greedy schedule is as large as possible.
 - **CLI and map**: options, input validation, schedule output, and generated map content.
+- **Pointing and Doppler**: range rate agrees with the change in range; Doppler is positive while
+  approaching, negative while receding, and zero at closest approach (within 2 s of the peak);
+  it never exceeds the orbital-speed limit; it scales with frequency; the overhead pass shows the
+  keyhole azimuth rate (a sign-flip mutation of the range rate fails three of these tests).
 - **Accuracy check**: OEM parsing (including covariance blocks and frame validation), the
   radial / along-track / cross-track frame, and SGP4 vs NASA on a one-day slice of a real NASA
   ephemeris (0.80 km at the start, mostly along-track).
