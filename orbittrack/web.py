@@ -19,7 +19,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi import Path as PathParam
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 import numpy as np
@@ -29,6 +30,7 @@ from skyfield.timelib import Time
 from orbittrack.mapview import build_map
 from orbittrack.observe import LookAngles, SubPoint, look_angles, sub_point
 from orbittrack.passes import Pass, compass_direction, find_passes, sky_track
+from orbittrack.pointing import ISS_DOWNLINK_HZ, PassProfile, pass_profile, pointing_csv
 from orbittrack.station import WEST_LAFAYETTE, GroundStation
 from orbittrack.tle import CELESTRAK_URL, fetch_tle_file, load_satellites, lookup_satellite, tle_age_days
 
@@ -404,6 +406,145 @@ def index(request: Request, params: Params, load_satellites_for: GroupLoader) ->
     context = {"params": params, "groups": GROUP_LABELS, "max_hours": MAX_HOURS, "satellite_names": names,
                "result": result, "error": error, "map_query": map_query}
     return templates.TemplateResponse(request, "index.html", context, status_code=status)
+
+
+# --- per-pass detail page ---
+
+class PassDetailQuery(PassQuery):
+    """The overview's parameters plus the radio frequency for the Doppler curve.
+
+    It's one model (not a separate query argument) because FastAPI only expands a Pydantic model
+    into query parameters when it's the route's sole query input.
+    """
+
+    freq_mhz: float = Field(ISS_DOWNLINK_HZ / 1e6, gt=1, le=30000,
+                            description="Downlink frequency in MHz (default: the ISS's 145.800 MHz voice downlink)")
+
+
+DetailParams = Annotated[PassDetailQuery, Query()]
+PassNumber = Annotated[int, PathParam(ge=1, le=500, description="Pass number, 1 = the first pass in the window")]
+
+CHART_WIDTH, CHART_HEIGHT = 640, 150
+
+
+def chart_path(xs: list[float], ys: list[float], y_min: float, y_max: float) -> str:
+    """An SVG polyline path for (x, y) data, with x spanning the full chart width."""
+    x_span = (xs[-1] - xs[0]) or 1.0
+
+    def point(x: float, y: float) -> str:
+        px = (x - xs[0]) / x_span * CHART_WIDTH
+        py = CHART_HEIGHT - (y - y_min) / (y_max - y_min) * CHART_HEIGHT
+        return f"{px:.1f},{py:.1f}"
+
+    return "M" + " L".join(point(x, y) for x, y in zip(xs, ys))
+
+
+def select_pass(p: Prediction, number: int) -> Pass:
+    if number > len(p.passes):
+        raise HTTPException(status_code=404, detail=f"there is no pass {number}; this window has {len(p.passes)}")
+    return p.passes[number - 1]
+
+
+def pass_page_result(p: Prediction, number: int, profile: PassProfile) -> dict:
+    """Everything the pass page shows, formatted, plus SVG geometry for its charts."""
+    zone = p.station.local_zone()
+    x = select_pass(p, number)
+
+    def local(moment: datetime, pattern: str = "%H:%M:%S") -> str:
+        return moment.astimezone(zone).strftime(pattern)
+
+    seconds = [(t - x.rise).total_seconds() for t in profile.times]
+    doppler_khz = (profile.doppler_hz / 1000).tolist()
+    swing = max(abs(min(doppler_khz)), abs(max(doppler_khz)))
+    limit = max(0.5, math.ceil(swing * 2) / 2)  # symmetric axis, rounded up to 0.5 kHz
+    peak_rate = float(profile.azimuth_rate_deg_s.max())
+
+    track = sky_track(p.satellite, p.station, x)
+    sky_points = [sky_xy(az, el) for az, el in track]
+
+    every_30s = [i for i, s in enumerate(seconds) if int(s) % 30 == 0] + [len(seconds) - 1]
+    return {
+        "number": number,
+        "count": len(p.passes),
+        "name": p.satellite.name.strip(),
+        "norad_id": p.satellite.model.satnum,
+        "date": local(x.rise, "%A %d %B %Y"),
+        "zone": local(x.rise, "%Z"),
+        "rise": local(x.rise), "peak": local(x.culmination), "set": local(x.set),
+        "max_el": f"{x.max_elevation_deg:.1f}°",
+        "duration": format_duration(x.duration),
+        "direction": f"{compass_direction(x.rise_azimuth_deg)} → {compass_direction(x.set_azimuth_deg)}",
+        "frequency_mhz": f"{profile.frequency_hz / 1e6:.3f}",
+        "doppler_start": f"{profile.doppler_hz[0] / 1000:+.2f} kHz",
+        "doppler_end": f"{profile.doppler_hz[-1] / 1000:+.2f} kHz",
+        "tune_start": f"{profile.received_hz[0] / 1e6:.4f}",
+        "tune_end": f"{profile.received_hz[-1] / 1e6:.4f}",
+        "min_range": f"{profile.range_km.min():,.0f}",
+        "peak_az_rate": f"{peak_rate:.1f}",
+        "keyhole": peak_rate > 5,
+        "charts": {
+            "w": CHART_WIDTH, "h": CHART_HEIGHT,
+            "doppler": chart_path(seconds, doppler_khz, -limit, limit),
+            "doppler_limit": f"{limit:g}",
+            "elevation": chart_path(seconds, profile.elevation_deg.tolist(), 0, 90),
+            "mask_y": round(CHART_HEIGHT - p.station.min_elevation_deg / 90 * CHART_HEIGHT, 1),
+            "peak_x": round((x.culmination - x.rise).total_seconds() / (seconds[-1] or 1) * CHART_WIDTH, 1),
+            "rise": local(x.rise, "%H:%M"), "peak": local(x.culmination, "%H:%M:%S"), "set": local(x.set, "%H:%M"),
+        },
+        "sky": {
+            "size": SKY_SIZE, "c": SKY_CENTER, "R": SKY_RADIUS,
+            "mask_r": round(SKY_RADIUS * (90 - p.station.min_elevation_deg) / 90, 1),
+            "rings": [{"r": round(SKY_RADIUS * (90 - el) / 90, 1), "label": f"{el}°"} for el in (30, 60)],
+            "d": "M" + " L".join(f"{px},{py}" for px, py in sky_points),
+            "start": sky_points[0], "end": sky_points[-1],
+        },
+        "rows": [
+            {
+                "time": local(profile.times[i]),
+                "az": f"{profile.azimuth_deg[i]:.1f}°",
+                "el": f"{profile.elevation_deg[i]:.1f}°",
+                "range": f"{profile.range_km[i]:,.0f}",
+                "doppler": f"{profile.doppler_hz[i]:+,.0f}",
+                "tune": f"{profile.received_hz[i] / 1e6:.4f}",
+            }
+            for i in sorted(set(every_30s))
+        ],
+    }
+
+
+def _pass_and_profile(params: PassDetailQuery, load_satellites_for: Callable[[str], list[EarthSatellite]], number: int):
+    p = _predict_or_http_error(params, load_satellites_for)
+    x = select_pass(p, number)
+    return p, pass_profile(p.satellite, p.station, x, frequency_hz=params.freq_mhz * 1e6)
+
+
+@app.get("/pass/{number}", response_class=HTMLResponse)
+def pass_page(request: Request, number: PassNumber, params: DetailParams, load_satellites_for: GroupLoader) -> HTMLResponse:
+    """One pass in detail: Doppler curve, elevation profile, sky track and pointing table."""
+    p, profile = _pass_and_profile(params, load_satellites_for, number)
+    freq_mhz = params.freq_mhz
+    # Pin the start time so links back to the overview and between passes show the same window.
+    query = {**params.model_dump(exclude_none=True, exclude={"freq_mhz"}), "start": p.start.utc_datetime().isoformat()}
+    context = {
+        "params": params,
+        "result": {"station_lat": coordinate(p.station.latitude_deg, "N", "S"),
+                   "station_lon": coordinate(p.station.longitude_deg, "E", "W")},
+        "detail": pass_page_result(p, number, profile),
+        "map_query": urlencode(query),
+        "freq_query": urlencode({**query, "freq_mhz": freq_mhz}),
+        "freq_mhz": freq_mhz,
+        "hidden_params": query,
+    }
+    return templates.TemplateResponse(request, "pass.html", context)
+
+
+@app.get("/pass/{number}/pointing.csv")
+def pass_pointing_csv(number: PassNumber, params: DetailParams, load_satellites_for: GroupLoader) -> Response:
+    """The pass sampled every second: azimuth, elevation, range, range rate, Doppler, tuning frequency."""
+    p, profile = _pass_and_profile(params, load_satellites_for, number)
+    filename = f"orbittrack_{p.satellite.model.satnum}_pass{number:02d}_{profile.times[0]:%Y%m%dT%H%M%S}Z.csv"
+    return Response(pointing_csv(profile), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @app.get("/map", response_class=HTMLResponse)

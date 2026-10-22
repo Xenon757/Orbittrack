@@ -304,3 +304,56 @@ def test_page_covers_the_map_with_a_loading_screen_until_it_is_ready(client):
     page = client.get("/", params=FIXED).text
     assert 'id="map-loading"' in page and 'class="map-loading"' in page  # visible until told otherwise
     assert '"orbittrack-map-ready"' in page and "event.origin === location.origin" in page
+
+
+# --- per-pass detail page and pointing download ---
+
+def test_overview_links_every_pass_to_its_detail_page(client):
+    page = client.get("/", params=FIXED).text
+    assert page.count('class="detail" href="/pass/') == 6
+    assert 'href="/pass/3?' in page
+
+
+def test_pass_page_shows_the_pass_doppler_and_pointing(client):
+    response = client.get("/pass/3", params=FIXED)
+    assert response.status_code == 200
+    page = response.text
+    assert "Pass of 6" in page and "84.9°" in page  # the near-overhead pass
+    assert "145.800 MHz downlink" in page
+    assert 'class="line red" d="M' in page  # Doppler curve drawn
+    assert "keyhole" in page  # fast azimuth swing flagged for an overhead pass
+    assert page.count("<tr><td>") >= 14  # pointing table, one row per 30 s of a ~7-minute pass
+    assert 'href="/pass/2?' in page and 'href="/pass/4?' in page  # previous / next
+
+
+def test_low_pass_has_no_keyhole_warning_and_no_previous_link(client):
+    page = client.get("/pass/1", params=FIXED).text
+    assert "keyhole" not in page.split("<form")[0].split("Peak azimuth rate")[1]
+    assert "← Pass 00" not in page and 'href="/pass/0?' not in page
+
+
+def test_frequency_changes_the_tuning_numbers(client):
+    page = client.get("/pass/3", params={**FIXED, "freq_mhz": 437.8}).text
+    assert "437.800 MHz downlink" in page
+    assert "437.80" in page.split("Tune at rise")[1][:60]
+
+
+@pytest.mark.parametrize("path, params, status", [
+    ("/pass/7", FIXED, 404),  # only 6 passes in this window
+    ("/pass/0", FIXED, 422),
+    ("/pass/1", {**FIXED, "freq_mhz": 0}, 422),
+    ("/pass/1/pointing.csv", {**FIXED, "freq_mhz": 50000}, 422),
+])
+def test_pass_routes_reject_bad_requests(client, path, params, status):
+    assert client.get(path, params=params).status_code == status
+
+
+def test_pointing_csv_downloads_every_second_of_the_pass(client, iss):
+    response = client.get("/pass/1/pointing.csv", params=FIXED)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert 'attachment; filename="orbittrack_25544_pass01_20261018T130650Z.csv"' == response.headers["content-disposition"]
+    lines = response.text.strip().splitlines()
+    first_pass = find_passes(iss, WEST_LAFAYETTE, web.ts.utc(2026, 10, 18, 12), 24)[0]
+    assert len(lines) - 1 == int(first_pass.duration.total_seconds()) + 2  # each second, plus the exact set time
+    assert lines[0].startswith("utc,azimuth_deg,elevation_deg")
