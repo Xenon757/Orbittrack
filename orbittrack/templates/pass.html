@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% set d = detail %}
+
+{% block title %}{{ d.name }} · Pass {{ "%02d" | format(d.number) }} · OrbitTrack{% endblock %}
+
+{% block extra_styles %}
+    .crumbs { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; margin-top: calc(var(--grid) * 4);
+      font-size: 0.875rem; }
+    .crumbs a { font-weight: 600; }
+    .crumbs .spacer { margin-left: auto; display: flex; gap: 20px; }
+    .facts { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0; border-top: 2px solid var(--ink); }
+    .fact { padding: 12px 16px 14px 0; border-bottom: 1px solid var(--rule); }
+    .fact .v { font-size: 1.75rem; font-weight: 700; font-stretch: 85%; line-height: 1.1; margin-top: 4px; }
+    .fact .v.red { color: var(--signal); }
+    .profile { display: grid; grid-template-columns: repeat(12, 1fr); gap: 0 24px; align-items: start; }
+    .profile .charts { grid-column: span 8; }
+    .profile .notes { grid-column: span 4; }
+    .chart { width: 100%; height: auto; display: block; overflow: visible; margin-bottom: 8px; }
+    .chart .frame { fill: none; stroke: var(--ink); stroke-width: 1; }
+    .chart .grid { stroke: var(--rule); stroke-width: 1; }
+    .chart .zero { stroke: var(--ink); stroke-width: 1; }
+    .chart .mask { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 2 4; }
+    .chart .peak { stroke: var(--signal); stroke-width: 1; stroke-dasharray: 3 3; }
+    .chart .line { fill: none; stroke: var(--ink); stroke-width: 2; }
+    .chart .line.red { stroke: var(--signal); stroke-width: 2.5; }
+    .chart text { font-family: var(--sans); fill: var(--graphite); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; }
+    .chart .title { fill: var(--ink); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; font-size: 10px; }
+    .notes dl { margin: 0; display: grid; grid-template-columns: 1fr auto; border-top: 2px solid var(--ink); }
+    .notes dt, .notes dd { margin: 0; padding: 9px 0; border-bottom: 1px solid var(--rule); }
+    .notes dd { text-align: right; font-weight: 700; }
+    .notes p { color: var(--graphite); font-size: 0.875rem; margin: 12px 0 0; text-wrap: pretty; }
+    .notes .warn { color: var(--ink); border-left: 3px solid var(--signal); padding-left: 10px; }
+    .freq-form { display: flex; gap: 0; align-items: end; margin-top: 16px; }
+    .freq-form .f { grid-column: auto; flex: 1; }
+    .freq-form button { padding: 12px 14px; }
+    .split-sky { display: grid; grid-template-columns: repeat(12, 1fr); gap: 0 24px; align-items: start; }
+    .split-sky > .sky { grid-column: span 4; }
+    .split-sky > .table { grid-column: span 8; }
+    .download { display: inline-flex; align-items: center; gap: 10px; margin-top: 16px; padding: 14px 18px; min-height: 44px;
+      background: var(--ink); color: var(--paper); font-weight: 700; font-size: 0.8125rem; letter-spacing: 0.12em;
+      text-transform: uppercase; text-decoration: none; }
+    .download:hover { background: var(--signal); color: var(--on-signal); }
+    @media (max-width: 900px) {
+      .facts { grid-template-columns: repeat(3, 1fr); }
+      .profile .charts, .profile .notes, .split-sky > .sky, .split-sky > .table { grid-column: 1 / -1; }
+      .profile .notes, .split-sky > .table { margin-top: calc(var(--grid) * 4); }
+    }
+    @media (max-width: 520px) { .facts { grid-template-columns: repeat(2, 1fr); } .crumbs .spacer { margin-left: 0; } }
+{% endblock %}
+
+{% block content %}
+  <nav class="crumbs" aria-label="Pass navigation">
+    <a href="/?{{ map_query }}">← All passes</a>
+    <span class="label">{{ d.name }} · NORAD {{ d.norad_id }}</span>
+    <span class="spacer">
+      {% if d.number > 1 %}<a href="/pass/{{ d.number - 1 }}?{{ freq_query }}">← Pass {{ "%02d" | format(d.number - 1) }}</a>{% endif %}
+      {% if d.number < d.count %}<a href="/pass/{{ d.number + 1 }}?{{ freq_query }}">Pass {{ "%02d" | format(d.number + 1) }} →</a>{% endif %}
+    </span>
+  </nav>
+
+  <section class="section" aria-labelledby="s-pass">
+    <h2 class="bar" id="s-pass"><span class="no">{{ "%02d" | format(d.number) }}</span> Pass of {{ d.count }} <span class="aside">{{ d.date }} · {{ d.zone }}</span></h2>
+    <div class="facts">
+      <div class="fact"><div class="label">Rise</div><div class="v">{{ d.rise }}</div></div>
+      <div class="fact"><div class="label">Peak</div><div class="v">{{ d.peak }}</div></div>
+      <div class="fact"><div class="label">Set</div><div class="v">{{ d.set }}</div></div>
+      <div class="fact"><div class="label">Max elevation</div><div class="v red">{{ d.max_el }}</div></div>
+      <div class="fact"><div class="label">Above mask</div><div class="v">{{ d.duration }}</div></div>
+      <div class="fact"><div class="label">Track</div><div class="v">{{ d.direction }}</div></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="s-profile">
+    <h2 class="bar" id="s-profile"><span class="no">02</span> Radio &amp; antenna <span class="aside">{{ d.frequency_mhz }} MHz downlink</span></h2>
+    {% set c = d.charts %}
+    <div class="profile">
+      <div class="charts">
+        <svg class="chart" viewBox="-44 -22 {{ c.w + 56 }} {{ c.h + 44 }}" role="img"
+             aria-label="Doppler shift through the pass: from {{ d.doppler_start }} at rise to {{ d.doppler_end }} at set">
+          <text class="title" x="0" y="-8">Doppler shift · kHz</text>
+          <line class="grid" x1="0" y1="{{ c.h / 4 }}" x2="{{ c.w }}" y2="{{ c.h / 4 }}"/>
+          <line class="grid" x1="0" y1="{{ c.h * 3 / 4 }}" x2="{{ c.w }}" y2="{{ c.h * 3 / 4 }}"/>
+          <line class="zero" x1="0" y1="{{ c.h / 2 }}" x2="{{ c.w }}" y2="{{ c.h / 2 }}"/>
+          <line class="peak" x1="{{ c.peak_x }}" y1="0" x2="{{ c.peak_x }}" y2="{{ c.h }}"/>
+          <rect class="frame" x="0" y="0" width="{{ c.w }}" height="{{ c.h }}"/>
+          <path class="line red" d="{{ c.doppler }}"/>
+          <text x="-8" y="4" text-anchor="end">+{{ c.doppler_limit }}</text>
+          <text x="-8" y="{{ c.h / 2 + 4 }}" text-anchor="end">0</text>
+          <text x="-8" y="{{ c.h + 4 }}" text-anchor="end">−{{ c.doppler_limit }}</text>
+        </svg>
+        <svg class="chart" viewBox="-44 -22 {{ c.w + 56 }} {{ c.h + 44 }}" role="img"
+             aria-label="Elevation through the pass, peaking at {{ d.max_el }} at {{ c.peak }}">
+          <text class="title" x="0" y="-8">Elevation · degrees</text>
+          <line class="grid" x1="0" y1="{{ c.h / 3 }}" x2="{{ c.w }}" y2="{{ c.h / 3 }}"/>
+          <line class="grid" x1="0" y1="{{ c.h * 2 / 3 }}" x2="{{ c.w }}" y2="{{ c.h * 2 / 3 }}"/>
+          <line class="mask" x1="0" y1="{{ c.mask_y }}" x2="{{ c.w }}" y2="{{ c.mask_y }}"/>
+          <line class="peak" x1="{{ c.peak_x }}" y1="0" x2="{{ c.peak_x }}" y2="{{ c.h }}"/>
+          <rect class="frame" x="0" y="0" width="{{ c.w }}" height="{{ c.h }}"/>
+          <path class="line" d="{{ c.elevation }}"/>
+          <text x="-8" y="4" text-anchor="end">90°</text>
+          <text x="-8" y="{{ c.h / 3 + 4 }}" text-anchor="end">60°</text>
+          <text x="-8" y="{{ c.h * 2 / 3 + 4 }}" text-anchor="end">30°</text>
+          <text x="-8" y="{{ c.h + 4 }}" text-anchor="end">0°</text>
+          <text x="0" y="{{ c.h + 18 }}">{{ c.rise }} rise</text>
+          <text x="{{ c.peak_x }}" y="{{ c.h + 18 }}" text-anchor="middle">{{ c.peak }} peak</text>
+          <text x="{{ c.w }}" y="{{ c.h + 18 }}" text-anchor="end">set {{ c.set }}</text>
+        </svg>
+      </div>
+      <div class="notes">
+        <dl>
+          <dt>Tune at rise</dt><dd class="mono">{{ d.tune_start }} MHz</dd>
+          <dt>Tune at set</dt><dd class="mono">{{ d.tune_end }} MHz</dd>
+          <dt>Doppler at rise / set</dt><dd>{{ d.doppler_start }} / {{ d.doppler_end }}</dd>
+          <dt>Closest range</dt><dd>{{ d.min_range }} km</dd>
+          <dt>Peak azimuth rate</dt><dd>{{ d.peak_az_rate }}°/s</dd>
+        </dl>
+        <p>The frequency rises while the satellite approaches and falls as it recedes, passing through
+          zero shift at closest approach (dashed red line).</p>
+        {% if d.keyhole %}
+        <p class="warn">Near-overhead pass: the antenna has to swing {{ d.peak_az_rate }}°/s in azimuth near the top
+          (the "keyhole"). Check your rotator's slew rate.</p>
+        {% endif %}
+        <form class="freq-form" method="get" action="/pass/{{ d.number }}">
+          {% for key, value in hidden_params.items() %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+          <div class="f">
+            <label for="freq_mhz">Downlink frequency · MHz</label>
+            <input id="freq_mhz" name="freq_mhz" type="number" step="any" min="1" max="30000" value="{{ freq_mhz }}">
+          </div>
+          <button class="go" type="submit">Update</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <div class="split-sky">
+    <section class="section sky" aria-labelledby="s-psky">
+      <h2 class="bar" id="s-psky"><span class="no">03</span> Sky</h2>
+      {% set sky = d.sky %}
+      <svg class="skyplot" viewBox="0 0 {{ sky.size }} {{ sky.size }}" role="img"
+           aria-label="This pass's path across the sky, from {{ d.direction }}. Center is overhead, edge is the horizon.">
+        <line class="axis" x1="{{ sky.c }}" y1="{{ sky.c - sky.R }}" x2="{{ sky.c }}" y2="{{ sky.c + sky.R }}"/>
+        <line class="axis" x1="{{ sky.c - sky.R }}" y1="{{ sky.c }}" x2="{{ sky.c + sky.R }}" y2="{{ sky.c }}"/>
+        {% for ring in sky.rings %}
+        <circle class="ring" cx="{{ sky.c }}" cy="{{ sky.c }}" r="{{ ring.r }}"/>
+        <text x="{{ sky.c + 4 }}" y="{{ sky.c - ring.r - 3 }}">{{ ring.label }}</text>
+        {% endfor %}
+        <circle class="mask" cx="{{ sky.c }}" cy="{{ sky.c }}" r="{{ sky.mask_r }}"/>
+        <circle class="horizon" cx="{{ sky.c }}" cy="{{ sky.c }}" r="{{ sky.R }}"/>
+        <text class="cardinal" x="{{ sky.c }}" y="{{ sky.c - sky.R - 8 }}" text-anchor="middle">N</text>
+        <text class="cardinal" x="{{ sky.c + sky.R + 8 }}" y="{{ sky.c + 4 }}" text-anchor="start">E</text>
+        <text class="cardinal" x="{{ sky.c }}" y="{{ sky.c + sky.R + 18 }}" text-anchor="middle">S</text>
+        <text class="cardinal" x="{{ sky.c - sky.R - 8 }}" y="{{ sky.c + 4 }}" text-anchor="end">W</text>
+        <g class="pass is-next">
+          <path class="path" d="{{ sky.d }}"/>
+          <circle class="tick" cx="{{ sky.start[0] }}" cy="{{ sky.start[1] }}" r="3.5"/>
+        </g>
+      </svg>
+      <div class="sky-legend"><span>○ rise point · dashed ring = mask</span></div>
+    </section>
+
+    <section class="section table" aria-labelledby="s-pointing">
+      <h2 class="bar" id="s-pointing"><span class="no">04</span> Pointing <span class="aside">Every 30 s · {{ d.zone }}</span></h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Time</th><th class="num">Azimuth</th><th class="num">Elevation</th><th class="num">Range km</th>
+            <th class="num">Doppler Hz</th><th class="num">Tune MHz</th>
+          </tr></thead>
+          <tbody>
+          {% for row in d.rows %}
+            <tr><td>{{ row.time }}</td><td class="num">{{ row.az }}</td><td class="num">{{ row.el }}</td>
+              <td class="num">{{ row.range }}</td><td class="num">{{ row.doppler }}</td><td class="num mono">{{ row.tune }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <a class="download" href="/pass/{{ d.number }}/pointing.csv?{{ freq_query }}" download>Download full pointing file · CSV, every second</a>
+      <p class="note">One row per second from rise to set (UTC): azimuth, elevation, range, range rate, Doppler shift
+        and the frequency to tune to. The inputs an antenna rotator and radio need to follow the pass.</p>
+    </section>
+  </div>
+{% endblock %}

@@ -108,7 +108,7 @@
         <table>
           <thead><tr>
             <th>No.</th><th>Date</th><th>Rise</th><th>Peak</th><th>Set</th>
-            <th class="num">Max el</th><th>Track</th><th class="num">Duration</th>
+            <th class="num">Max el</th><th>Track</th><th class="num">Duration</th><th><span class="sr-only">Details</span></th>
           </tr></thead>
           <tbody>
           {% for row in result.passes %}
@@ -116,6 +116,7 @@
               <td class="no">{{ "%02d" | format(loop.index) }}</td><td>{{ row.date }}</td><td class="rise">{{ row.rise }}</td>
               <td>{{ row.peak }}</td><td>{{ row.set }}</td><td class="num">{{ row.max_el }}</td>
               <td>{{ row.direction }}</td><td class="num">{{ row.duration }}</td>
+              <td class="num"><a class="detail" href="/pass/{{ loop.index }}?{{ map_query }}">Details →</a></td>
             </tr>
           {% endfor %}
           </tbody>
