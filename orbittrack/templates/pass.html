@@ -45,7 +45,11 @@
       .profile .charts, .profile .notes, .split-sky > .sky, .split-sky > .table { grid-column: 1 / -1; }
       .profile .notes, .split-sky > .table { margin-top: calc(var(--grid) * 4); }
     }
-    @media (max-width: 520px) { .facts { grid-template-columns: repeat(2, 1fr); } .crumbs .spacer { margin-left: 0; } }
+    @media (max-width: 520px) {
+      .facts { grid-template-columns: repeat(2, 1fr); } .crumbs .spacer { margin-left: 0; }
+      /* The charts scale down with the screen, so their text needs larger user units to stay readable. */
+      .chart text { font-size: 19px; } .chart .title { font-size: 17px; }
+    }
 {% endblock %}
 
 {% block content %}
@@ -59,7 +63,7 @@
   </nav>
 
   <section class="section" aria-labelledby="s-pass">
-    <h2 class="bar" id="s-pass"><span class="no">{{ "%02d" | format(d.number) }}</span> Pass of {{ d.count }} <span class="aside">{{ d.date }} · {{ d.zone }}</span></h2>
+    <h2 class="bar" id="s-pass"><span class="no">{{ "%02d" | format(d.number) }}</span> of {{ d.count }} passes <span class="aside">{{ d.date }} · {{ d.zone }}</span></h2>
     <div class="facts">
       <div class="fact"><div class="label">Rise</div><div class="v">{{ d.rise }}</div></div>
       <div class="fact"><div class="label">Peak</div><div class="v">{{ d.peak }}</div></div>

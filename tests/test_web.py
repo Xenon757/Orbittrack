@@ -318,7 +318,7 @@ def test_pass_page_shows_the_pass_doppler_and_pointing(client):
     response = client.get("/pass/3", params=FIXED)
     assert response.status_code == 200
     page = response.text
-    assert "Pass of 6" in page and "84.9°" in page  # the near-overhead pass
+    assert "of 6 passes" in page and "84.9°" in page  # the near-overhead pass
     assert "145.800 MHz downlink" in page
     assert 'class="line red" d="M' in page  # Doppler curve drawn
     assert "keyhole" in page  # fast azimuth swing flagged for an overhead pass
