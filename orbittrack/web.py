@@ -32,6 +32,7 @@ from orbittrack.observe import LookAngles, SubPoint, look_angles, sub_point
 from orbittrack.passes import Pass, compass_direction, find_passes, sky_track
 from orbittrack.pointing import ISS_DOWNLINK_HZ, PassProfile, pass_profile, pointing_csv
 from orbittrack.station import WEST_LAFAYETTE, GroundStation
+from orbittrack.accuracy import NASA_OEM_URL, Ephemeris, compare, fetch_oem_file, parse_oem, summary_rows
 from orbittrack.tle import CELESTRAK_URL, fetch_tle_file, load_satellites, lookup_satellite, tle_age_days
 
 # Only these CelesTrak groups can be requested. On a public server the group name ends up in
@@ -63,6 +64,8 @@ DOWNLOAD_FAILED = "Couldn't download orbital data right now, and nothing is cach
 # hosting providers' networks can't reach CelesTrak, so a deployment can point this at a
 # mirror (see .github/workflows/tle-mirror.yml), e.g. https://<user>.github.io/<repo>/{group}.tle
 TLE_SOURCE = os.environ.get("ORBITTRACK_TLE_URL", CELESTRAK_URL)
+# NASA's ISS ephemeris for the accuracy page; the deployment reads the same GitHub Pages mirror.
+OEM_SOURCE = os.environ.get("ORBITTRACK_OEM_URL", NASA_OEM_URL)
 log = logging.getLogger("orbittrack.web")
 
 
@@ -99,6 +102,42 @@ def load_group(group: str) -> list[EarthSatellite]:
         if group not in _parsed or _parsed[group][0] != modified:
             _parsed[group] = (modified, load_satellites(path))
         return _parsed[group][1]
+
+
+_ephemeris: tuple[float, Ephemeris] | None = None  # (file mtime, parsed ephemeris)
+
+
+def load_iss_ephemeris() -> Ephemeris:
+    """NASA's ISS ephemeris, downloaded at most every few hours and parsed once per download.
+
+    Same lock and retry back-off as the TLE groups: a failed download is not retried for
+    RETRY_AFTER_SECONDS, so visitors get an immediate 503 instead of waiting on the network.
+    """
+    global _ephemeris
+    with _cache_lock:
+        failed = _last_failure.get("nasa-oem")
+        if failed and time.monotonic() - failed[0] < RETRY_AFTER_SECONDS:
+            raise OSError(failed[1])
+        try:
+            path = fetch_oem_file(OEM_SOURCE)
+            modified = path.stat().st_mtime
+            if _ephemeris is None or _ephemeris[0] != modified:
+                _ephemeris = (modified, parse_oem(path.read_text()))
+        except (OSError, ValueError) as error:
+            reason = str(error) or type(error).__name__
+            log.warning("NASA ephemeris from %s unavailable: %s", OEM_SOURCE, reason)
+            _last_failure["nasa-oem"] = (time.monotonic(), reason)
+            raise OSError(reason) from error
+        _last_failure.pop("nasa-oem", None)
+        return _ephemeris[1]
+
+
+def get_ephemeris_loader() -> Callable[[], Ephemeris]:
+    """A FastAPI dependency, so tests can swap in the offline fixture ephemeris."""
+    return load_iss_ephemeris
+
+
+EphemerisLoader = Annotated[Callable[[], Ephemeris], Depends(get_ephemeris_loader)]
 
 
 def get_group_loader() -> Callable[[str], list[EarthSatellite]]:

@@ -31,9 +31,10 @@ from pathlib import Path
 import numpy as np
 from skyfield.api import EarthSatellite, load
 
-from orbittrack.tle import fetch_tle_file, load_satellites, lookup_satellite
+from orbittrack.tle import DEFAULT_CACHE_DIR, MAX_CACHE_AGE_HOURS, download_cached, fetch_tle_file, load_satellites, lookup_satellite
 
 ISS_NORAD_ID = "25544"
+NASA_OEM_URL = "https://nasa-public-data.s3.amazonaws.com/iss-coords/current/ISS_OEM/ISS.OEM_J2K_EPH.txt"
 DATA_LINE = re.compile(r"^\d{4}-\d{2}-\d{2}T\S+(\s+[-+0-9.Ee]+){6}\s*$")
 
 
@@ -83,6 +84,16 @@ def parse_oem(text: str) -> Ephemeris:
 
     array = np.array(states)
     return Ephemeris(times, array[:, :3], array[:, 3:], reference_frame="EME2000", time_system="UTC")
+
+
+def fetch_oem_file(
+    url: str = NASA_OEM_URL, cache_dir: Path = DEFAULT_CACHE_DIR, max_age_hours: float = MAX_CACHE_AGE_HOURS
+) -> Path:
+    """NASA's ISS ephemeris, cached locally; NASA refreshes it about daily, so 6 hours is plenty."""
+    return download_cached(
+        url, cache_dir / "iss_oem.txt", max_age_hours,
+        looks_valid=lambda data: data.startswith(b"CCSDS_OEM_VERS"), what="a CCSDS OEM ephemeris",
+    )
 
 
 @dataclass(frozen=True)

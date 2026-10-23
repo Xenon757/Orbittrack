@@ -2,6 +2,7 @@
 
 import time
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 
 from skyfield.api import EarthSatellite, load
@@ -18,29 +19,21 @@ DEFAULT_CACHE_DIR = Path(__file__).resolve().parent.parent / "cache"
 MAX_CACHE_AGE_HOURS = 6.0
 
 
-def fetch_tle_file(
-    group: str = "stations",
-    cache_dir: Path = DEFAULT_CACHE_DIR,
-    max_age_hours: float = MAX_CACHE_AGE_HOURS,
-    url_template: str = CELESTRAK_URL,
+def download_cached(
+    url: str, path: Path, max_age_hours: float, looks_valid: Callable[[bytes], bool], what: str
 ) -> Path:
-    """Return a path to a local TLE file for `group`, downloading only if the cache is stale.
-
-    `url_template` (with a {group} placeholder) lets a deployment read from a mirror of
-    CelesTrak's files instead of CelesTrak itself.
+    """Return `path`, re-downloading it from `url` only if the cached copy is older than `max_age_hours`.
 
     If the download fails but an old cached file exists, we fall back to it rather than
-    crashing: slightly stale elements are still far better than no elements at all.
+    crashing: slightly stale data is far better than none. A response that doesn't look like
+    the expected data (an error page, say) is rejected and never written over the cache.
     """
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    path = cache_dir / f"{group}.tle"
-
+    path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         age_hours = (time.time() - path.stat().st_mtime) / 3600
         if age_hours < max_age_hours:
             return path
 
-    url = url_template.format(group=group)
     request = urllib.request.Request(url, headers={"User-Agent": "OrbitTrack/0.1"})
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
@@ -51,13 +44,30 @@ def fetch_tle_file(
             return path
         raise
 
-    # CelesTrak answers bad group names with a short plain-text error, not a TLE.
-    # Every 3-line TLE record has a line starting with "1 " right after the name line.
-    if b"\n1 " not in data:
-        raise ValueError(f"{url} did not return TLE data for group {group!r}: {data[:100]!r}")
+    if not looks_valid(data):
+        raise ValueError(f"{url} did not return {what}: {data[:100]!r}")
 
     path.write_bytes(data)
     return path
+
+
+def fetch_tle_file(
+    group: str = "stations",
+    cache_dir: Path = DEFAULT_CACHE_DIR,
+    max_age_hours: float = MAX_CACHE_AGE_HOURS,
+    url_template: str = CELESTRAK_URL,
+) -> Path:
+    """Return a path to a local TLE file for `group`, downloading only if the cache is stale.
+
+    `url_template` (with a {group} placeholder) lets a deployment read from a mirror of
+    CelesTrak's files instead of CelesTrak itself.
+    """
+    # CelesTrak answers bad group names with a short plain-text error, not a TLE.
+    # Every 3-line TLE record has a line starting with "1 " right after the name line.
+    return download_cached(
+        url_template.format(group=group), cache_dir / f"{group}.tle", max_age_hours,
+        looks_valid=lambda data: b"\n1 " in data, what=f"TLE data for group {group!r}",
+    )
 
 
 def load_satellites(path: Path) -> list[EarthSatellite]:
