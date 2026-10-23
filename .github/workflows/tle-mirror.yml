@@ -1,9 +1,11 @@
-# Mirrors CelesTrak's TLE files for the web app's groups to GitHub Pages every 6 hours.
+# Mirrors CelesTrak's TLE files for the web app's groups, and NASA's ISS ephemeris, to GitHub
+# Pages every 6 hours.
 #
 # Why: some hosting networks (including Render's) can't reach CelesTrak, so the deployed web
-# app reads these copies instead (ORBITTRACK_TLE_URL). Four runs a day is well within
-# CelesTrak's request limits. If any download fails, the job fails before publishing, so the
-# last good mirror stays online.
+# app reads these copies instead (ORBITTRACK_TLE_URL, ORBITTRACK_OEM_URL). Four runs a day is
+# well within CelesTrak's request limits. If any TLE download fails, the job fails before
+# publishing, so the last good mirror stays online. The NASA file is optional: if it can't be
+# fetched, the previously published copy is kept.
 name: Mirror TLEs to GitHub Pages
 
 on:
@@ -42,12 +44,34 @@ jobs:
             grep -q '^1 ' "site/${group}.tle" || { echo "No TLE data for ${group}"; exit 1; }
             echo "${group}: $(grep -c '^1 ' "site/${group}.tle") satellites"
           done
+
+      - name: Download NASA's ISS ephemeris
+        # Never fails the job: a NASA outage shouldn't stop the TLE mirror. Pages replaces the
+        # whole site on every deploy, so when NASA can't be reached we re-publish the last copy.
+        run: |
+          nasa="https://nasa-public-data.s3.amazonaws.com/iss-coords/current/ISS_OEM/ISS.OEM_J2K_EPH.txt"
+          previous="https://xenon757.github.io/Orbittrack/iss_oem.txt"
+          valid() { head -1 "$1" | grep -q '^CCSDS_OEM_VERS' && grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$1"; }
+          if curl --fail --silent --show-error --retry 3 --retry-delay 10 --max-time 120 \
+               --output site/iss_oem.txt "$nasa" && valid site/iss_oem.txt; then
+            echo "NASA ephemeris: $(grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' site/iss_oem.txt) state vectors"
+          elif curl --fail --silent --max-time 60 --output site/iss_oem.txt "$previous" && valid site/iss_oem.txt; then
+            echo "::warning::NASA ephemeris unavailable; re-publishing the previous copy"
+          else
+            rm -f site/iss_oem.txt
+            echo "::warning::NASA ephemeris unavailable and no previous copy; skipping it"
+          fi
+
+      - name: Write index page
+        run: |
           date -u +"%Y-%m-%dT%H:%M:%SZ" > site/updated.txt
           {
             echo "<!doctype html><title>OrbitTrack TLE mirror</title>"
-            echo "<p>Copies of CelesTrak TLE files used by the OrbitTrack web app."
-            echo "Updated $(cat site/updated.txt). Source: <a href=\"https://celestrak.org\">CelesTrak</a>.</p><ul>"
+            echo "<p>Copies of CelesTrak TLE files and NASA's ISS ephemeris used by the OrbitTrack web app."
+            echo "Updated $(cat site/updated.txt). Sources: <a href=\"https://celestrak.org\">CelesTrak</a>,"
+            echo "<a href=\"https://nasa-public-data.s3.amazonaws.com/iss-coords/current/ISS_OEM/ISS.OEM_J2K_EPH.txt\">NASA JSC</a>.</p><ul>"
             for group in $GROUPS; do echo "<li><a href=\"${group}.tle\">${group}.tle</a></li>"; done
+            [ -f site/iss_oem.txt ] && echo "<li><a href=\"iss_oem.txt\">iss_oem.txt</a> (NASA ISS ephemeris, CCSDS OEM)</li>"
             echo "</ul>"
           } > site/index.html
 
