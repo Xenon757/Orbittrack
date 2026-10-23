@@ -24,6 +24,11 @@ ground track on an interactive map, and serve predictions through a small web ap
   satellite at a time), and reports the next scheduled contact.
 - **Ground-track map**: an HTML map (folium / Leaflet) showing the ground track, the station's
   coverage circle, each predicted pass, and the satellite's position at the start time.
+- **Accuracy page**: `/accuracy` (linked from every page's footer) compares the current TLE
+  with NASA's latest ISS ephemeris live: the measured difference at the start of NASA's file,
+  the divergence over its 15 days (with cross-track and radial plotted as a 3-hour envelope),
+  checkpoint rows, and the recorded 2026-10-21 study. If either data source is unavailable, the
+  page still loads with the recorded study.
 - **Per-pass detail**: each pass has its own page (linked from the pass table) with the radio
   Doppler shift through the pass for a chosen downlink frequency (default 145.800 MHz, the ISS
   voice downlink), the elevation profile, the pass's path on a sky plot, the peak antenna
@@ -127,7 +132,8 @@ disk is wiped on restart, so the first request after waking downloads fresh TLEs
 **TLE mirror.** Requests from Render's network to CelesTrak time out, so the deployed app
 doesn't download from CelesTrak directly. Instead, `.github/workflows/tle-mirror.yml` runs on
 GitHub Actions every 6 hours, downloads the six allowed groups from CelesTrak, checks each file
-contains TLE data, and publishes them to GitHub Pages
+contains TLE data, also fetches NASA's ISS ephemeris (falling back to the previously published
+copy if NASA can't be reached), and publishes them to GitHub Pages
 (<https://xenon757.github.io/Orbittrack/>). If any download fails, nothing is published and the
 previous files stay up. The web app reads its source from the `ORBITTRACK_TLE_URL` environment
 variable (a URL with a `{group}` placeholder, defaulting to CelesTrak), which `render.yaml` sets
@@ -206,7 +212,8 @@ python -m orbittrack.accuracy --oem ISS.OEM_J2K_EPH.txt --tle-file tests/fixture
 ```
 
 It splits the position difference into along-track, cross-track and radial parts, and converts
-the along-track part into a timing error (along-track km ÷ speed).
+the along-track part into a timing error (along-track km ÷ speed). The web app runs the same
+comparison live at `/accuracy`, reading NASA's file through the GitHub Pages mirror.
 
 Results against the ephemeris published 2026-10-21 (starting 12:00 UTC):
 
@@ -244,7 +251,7 @@ How to read it:
 | `cli.py` | Argument parsing, validation, and table output |
 | `pointing.py` | Per-pass profile sampled every second: azimuth/elevation, range, range rate (line-of-sight speed), Doppler shift, azimuth rate, CSV export |
 | `accuracy.py` | Parse NASA OEM ephemerides and compare SGP4/TLE predictions against them (radial / along-track / cross-track) |
-| `web.py`, `templates/` | FastAPI routes (`/`, `/pass/{n}`, `/pass/{n}/pointing.csv`, `/map`, `/api/passes`, `/healthz`), parameter validation, shared TLE cache |
+| `web.py`, `templates/` | FastAPI routes (`/`, `/pass/{n}`, `/pass/{n}/pointing.csv`, `/accuracy`, `/map`, `/api/passes`, `/healthz`), parameter validation, shared TLE cache |
 | `.github/workflows/tle-mirror.yml` | Scheduled GitHub Actions job that mirrors the web app's TLE groups to GitHub Pages |
 
 Key details:
@@ -273,7 +280,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs both on every push and pull req
 mypy checks all of `orbittrack/`; Skyfield ships no type hints, so values from it are
 treated as untyped.
 
-152 tests, all offline. They use a real CelesTrak TLE file from 2026-10-18 checked into
+158 tests, all offline. They use a real CelesTrak TLE file from 2026-10-18 checked into
 `tests/fixtures/` and fixed start times, so results are deterministic. CLI tests fail if
 anything tries to download, and web tests swap in the fixture through FastAPI's dependency
 overrides. The tests include:
