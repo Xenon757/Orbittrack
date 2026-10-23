@@ -7,6 +7,8 @@ python_version = "3.12"
 files = ["orbittrack"]
 warn_unused_ignores = true
 warn_redundant_casts = true
+# Teaches mypy how Pydantic models work (Field defaults, validators).
+plugins = ["pydantic.mypy"]
 
 # Skyfield ships no type hints, so values from it are treated as untyped (Any).
 # Everything in our own code is still checked.

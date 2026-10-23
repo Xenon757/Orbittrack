@@ -586,6 +586,75 @@ def pass_pointing_csv(number: PassNumber, params: DetailParams, load_satellites_
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
+# --- accuracy page: our SGP4 predictions vs NASA's ISS ephemeris ---
+
+ACCURACY_CHART_W, ACCURACY_CHART_H = 640, 170
+
+
+def accuracy_page_result(satellite: EarthSatellite, ephemeris: Ephemeris) -> dict:
+    """The live comparison, formatted, with SVG paths for the divergence charts."""
+    result = compare(satellite, ephemeris)
+    start = ephemeris.times[0]
+    days = np.array([(t - start).total_seconds() / 86400 for t in ephemeris.times])
+    keep = np.arange(0, len(days), 8)  # every 32 minutes is plenty for a chart
+
+    def path(values: np.ndarray, low: float, high: float) -> str:
+        span_days = days[-1] or 1.0
+        points = (f"{d / span_days * ACCURACY_CHART_W:.1f},"
+                  f"{ACCURACY_CHART_H - (v - low) / (high - low) * ACCURACY_CHART_H:.1f}"
+                  for d, v in zip(days[keep], values[keep]))
+        return "M" + " L".join(points)
+
+    total_top = max(5.0, float(np.ceil(result.total_km.max() / 10) * 10))
+    side = max(1.0, float(np.ceil(max(np.abs(result.cross_km).max(), np.abs(result.radial_km).max()))))
+    age_hours = float(result.tle_age_days[0]) * 24
+    return {
+        "tle_epoch": satellite.epoch.utc_strftime("%Y-%m-%d %H:%M UTC"),
+        "oem_start": f"{start:%Y-%m-%d %H:%M} UTC",
+        "oem_end": f"{ephemeris.times[-1]:%Y-%m-%d %H:%M} UTC",
+        "oem_count": f"{len(ephemeris.times):,}",
+        "start_km": f"{result.total_km[0]:.2f}",
+        "start_timing": f"{result.timing_error_s[0]:+.2f}",
+        "tle_age": (f"{age_hours / 24:.2f} days old" if age_hours >= 0
+                    else f"{-age_hours:.1f} h newer than NASA's file start"),
+        "along_share": f"{np.sum(result.along_km ** 2) / np.sum(result.total_km ** 2):.1%}",
+        "max_cross": f"{np.abs(result.cross_km).max():.1f}",
+        "max_radial": f"{np.abs(result.radial_km).max():.1f}",
+        "rows": [
+            {
+                "day": round((row["time"] - start).total_seconds() / 86400),
+                "time": f"{row['time']:%d %b %H:%M}",
+                "total": f"{row['total_km']:.2f}",
+                "along": f"{row['along_km']:+.2f}",
+                "cross": f"{row['cross_km']:+.2f}",
+                "radial": f"{row['radial_km']:+.2f}",
+                "timing": f"{row['timing_s']:+.2f}",
+            }
+            for row in summary_rows(result)
+        ],
+        "chart": {
+            "w": ACCURACY_CHART_W, "h": ACCURACY_CHART_H, "days": f"{days[-1]:.0f}",
+            "total": path(result.total_km, 0, total_top), "total_top": f"{total_top:g}",
+            "cross": path(result.cross_km, -side, side), "radial": path(result.radial_km, -side, side),
+            "side": f"{side:g}",
+        },
+    }
+
+
+@app.get("/accuracy", response_class=HTMLResponse)
+def accuracy_page(request: Request, load_satellites_for: GroupLoader, load_ephemeris: EphemerisLoader) -> HTMLResponse:
+    """How close our SGP4/TLE predictions are to NASA's own ISS trajectory, checked live."""
+    live, error = None, None
+    try:
+        iss = lookup_satellite(load_satellites_for("stations"), "25544")
+        live = accuracy_page_result(iss, load_ephemeris())
+    except (OSError, LookupError) as problem:
+        error = str(problem)
+    # The masthead belongs to the overview; this page has its own, so give it neutral defaults.
+    context = {"params": PassQuery(), "result": None, "live": live, "error": error, "map_query": ""}
+    return templates.TemplateResponse(request, "accuracy.html", context)
+
+
 @app.get("/map", response_class=HTMLResponse)
 def map_page(params: Params, load_satellites_for: GroupLoader) -> HTMLResponse:
     """The interactive ground-track map for the same parameters (embedded by the main page)."""
