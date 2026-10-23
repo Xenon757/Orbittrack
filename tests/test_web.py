@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from orbittrack import web
+from orbittrack.accuracy import parse_oem
 from orbittrack.passes import find_passes
 from orbittrack.station import WEST_LAFAYETTE
 from orbittrack.tle import load_satellites
@@ -20,20 +21,26 @@ from orbittrack.tle import load_satellites
 FIXED = {"start": "2026-10-18T12:00"}  # about an hour after the fixture's TLE epoch
 
 
+OEM_FIXTURE = Path(__file__).parent / "fixtures" / "iss_oem_2026-10-21_first_day.txt"
+
+
 @pytest.fixture
 def client(tle_path):
     satellites = load_satellites(tle_path)
+    ephemeris = parse_oem(OEM_FIXTURE.read_text())
     web.app.dependency_overrides[web.get_group_loader] = lambda: (lambda group: satellites)
+    web.app.dependency_overrides[web.get_ephemeris_loader] = lambda: (lambda: ephemeris)
     yield TestClient(web.app)
     web.app.dependency_overrides.clear()
 
 
 @pytest.fixture
 def offline_client():
-    """A client whose TLE loader fails the way a CelesTrak outage with no cache would."""
-    def unreachable(group):
+    """A client whose data loaders fail the way a CelesTrak or NASA outage with no cache would."""
+    def unreachable(*args):
         raise OSError("network down")
     web.app.dependency_overrides[web.get_group_loader] = lambda: unreachable
+    web.app.dependency_overrides[web.get_ephemeris_loader] = lambda: unreachable
     yield TestClient(web.app)
     web.app.dependency_overrides.clear()
 
@@ -357,3 +364,61 @@ def test_pointing_csv_downloads_every_second_of_the_pass(client, iss):
     first_pass = find_passes(iss, WEST_LAFAYETTE, web.ts.utc(2026, 10, 18, 12), 24)[0]
     assert len(lines) - 1 == int(first_pass.duration.total_seconds()) + 2  # each second, plus the exact set time
     assert lines[0].startswith("utc,azimuth_deg,elevation_deg")
+
+
+# --- accuracy page ---
+
+def test_accuracy_page_shows_the_live_comparison_and_recorded_study(client):
+    response = client.get("/accuracy")
+    assert response.status_code == 200
+    page = response.text
+    # Fixture TLE (epoch 2026-10-18 11:13) vs the fixture NASA ephemeris (starts 2026-10-21 12:00).
+    assert '<div class="v">0.80<small>km</small></div>' in page
+    assert "3.03 days old" in page
+    assert page.count('class="line') >= 3  # distance, cross-track and radial curves
+    assert "<td>Start</td>" in page and "<td>+1</td>" in page  # the one-day fixture has two checkpoints
+    assert "18 Oct 2026 11:13 UTC" in page and "113.5 km" in page  # recorded study table
+    assert "Only the first row is a" in page  # the measured-vs-forecast caveat
+
+
+def test_accuracy_page_still_loads_when_data_is_unavailable(offline_client):
+    response = offline_client.get("/accuracy")
+    assert response.status_code == 200
+    assert "The live check is unavailable right now: network down" in response.text
+    assert "Recorded study" in response.text
+
+
+def test_every_page_links_to_the_accuracy_check(client):
+    for path in ("/", "/pass/1", "/accuracy"):
+        assert 'href="/accuracy"' in client.get(path, params=FIXED).text
+
+
+def test_ephemeris_is_parsed_once_and_failures_back_off(monkeypatch, tmp_path):
+    cached = tmp_path / "iss_oem.txt"
+    cached.write_text(OEM_FIXTURE.read_text())
+    calls = []
+    monkeypatch.setattr(web, "fetch_oem_file", lambda url: calls.append(url) or cached)
+    monkeypatch.setattr(web, "OEM_SOURCE", "https://mirror.example/iss_oem.txt")
+    monkeypatch.setattr(web, "_ephemeris", None)
+    monkeypatch.setattr(web, "_last_failure", {})
+
+    first = web.load_iss_ephemeris()
+    assert web.load_iss_ephemeris() is first  # parsed once, reused
+    assert calls == ["https://mirror.example/iss_oem.txt"] * 2
+
+    def broken(url):
+        raise OSError("timed out")
+    monkeypatch.setattr(web, "fetch_oem_file", broken)
+    monkeypatch.setattr(web, "_ephemeris", None)
+    with pytest.raises(OSError):
+        web.load_iss_ephemeris()
+    monkeypatch.setattr(web, "fetch_oem_file", lambda url: pytest.fail("retried during back-off"))
+    with pytest.raises(OSError, match="timed out"):
+        web.load_iss_ephemeris()
+
+
+def test_deployment_reads_the_mirrored_ephemeris():
+    root = Path(__file__).parent.parent
+    workflow = (root / ".github" / "workflows" / "tle-mirror.yml").read_text()
+    assert "site/iss_oem.txt" in workflow and "nasa-public-data.s3.amazonaws.com" in workflow
+    assert "ORBITTRACK_OEM_URL" in (root / "render.yaml").read_text()

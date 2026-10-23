@@ -125,3 +125,29 @@ def test_cli_reports_and_writes_csv(tle_path, tmp_path, capsys, monkeypatch):
     assert "Measured at the OEM start (tracking-based): 0.80 km" in out
     assert "3.03-day-old TLE" in out
     assert len(out_csv.read_text().splitlines()) == 362  # header + 361 samples
+
+
+def test_fetch_oem_file_rejects_anything_that_is_not_an_ephemeris(tmp_path, monkeypatch):
+    import urllib.request
+
+    class Page:
+        def __init__(self, body):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return self.body
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout: Page(b"<html>Access Denied</html>"))
+    with pytest.raises(ValueError):
+        accuracy.fetch_oem_file("https://example.test/oem.txt", cache_dir=tmp_path)
+    assert not (tmp_path / "iss_oem.txt").exists()
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout: Page(OEM_FIXTURE.read_bytes()))
+    path = accuracy.fetch_oem_file("https://example.test/oem.txt", cache_dir=tmp_path)
+    assert parse_oem(path.read_text()).times[0].year == 2026
