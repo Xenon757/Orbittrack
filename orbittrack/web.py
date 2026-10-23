@@ -607,6 +607,19 @@ def accuracy_page_result(satellite: EarthSatellite, ephemeris: Ephemeris) -> dic
 
     total_top = max(5.0, float(np.ceil(result.total_km.max() / 10) * 10))
     side = max(1.0, float(np.ceil(max(np.abs(result.cross_km).max(), np.abs(result.radial_km).max()))))
+
+    # Cross-track and radial differences oscillate once per orbit (~92 min); drawn point by point
+    # that's an unreadable wall of zigzags. The meaningful quantity is how big the swing gets,
+    # so draw its envelope: the largest absolute value in each 3-hour window.
+    windows = np.floor(days * 8).astype(int)  # 8 windows per day
+    edges = [(days[windows == w].mean(), np.abs(result.cross_km[windows == w]).max(),
+              np.abs(result.radial_km[windows == w]).max()) for w in np.unique(windows)]
+    env_days, env_cross, env_radial = (np.array(column) for column in zip(*edges))
+
+    def envelope_path(values: np.ndarray) -> str:
+        span_days = days[-1] or 1.0
+        return "M" + " L".join(f"{d / span_days * ACCURACY_CHART_W:.1f},{ACCURACY_CHART_H - v / side * ACCURACY_CHART_H:.1f}"
+                               for d, v in zip(env_days, values))
     age_hours = float(result.tle_age_days[0]) * 24
     return {
         "tle_epoch": satellite.epoch.utc_strftime("%Y-%m-%d %H:%M UTC"),
@@ -635,8 +648,9 @@ def accuracy_page_result(satellite: EarthSatellite, ephemeris: Ephemeris) -> dic
         "chart": {
             "w": ACCURACY_CHART_W, "h": ACCURACY_CHART_H, "days": f"{days[-1]:.0f}",
             "total": path(result.total_km, 0, total_top), "total_top": f"{total_top:g}",
-            "cross": path(result.cross_km, -side, side), "radial": path(result.radial_km, -side, side),
-            "side": f"{side:g}",
+            "total_mid": f"{total_top / 2:g}",
+            "cross": envelope_path(env_cross), "radial": envelope_path(env_radial),
+            "side": f"{side:g}", "side_mid": f"{side / 2:g}",
         },
     }
 

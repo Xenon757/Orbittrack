@@ -80,22 +80,22 @@
       <path class="line" d="{{ c.total }}"/>
       <circle class="measured" cx="0" cy="{{ c.h }}" r="5"/>
       <text x="-8" y="4" text-anchor="end">{{ c.total_top }}</text>
-      <text x="-8" y="{{ c.h / 2 + 4 }}" text-anchor="end">{{ (c.total_top | float / 2) | round(1) }}</text>
+      <text x="-8" y="{{ c.h / 2 + 4 }}" text-anchor="end">{{ c.total_mid }}</text>
       <text x="-8" y="{{ c.h + 4 }}" text-anchor="end">0</text>
       <text x="0" y="{{ c.h + 18 }}">Measured (tracking)</text>
       <text x="{{ c.w }}" y="{{ c.h + 18 }}" text-anchor="end">+{{ c.days }} days · vs NASA's forecast</text>
     </svg>
     <svg class="chart" viewBox="-48 -26 {{ c.w + 64 }} {{ c.h + 50 }}" role="img"
-         aria-label="Cross-track and radial components stay within {{ c.side }} km">
-      <text class="title" x="0" y="-10">Cross-track &amp; radial · km</text>
+         aria-label="Largest cross-track and radial differences in each 3-hour window, all within {{ c.side }} km">
+      <text class="title" x="0" y="-10">Cross-track &amp; radial · largest per 3 h · km</text>
       <text class="key" x="{{ c.w }}" y="-10" text-anchor="end">— cross-track   - - radial</text>
-      <line class="zero" x1="0" y1="{{ c.h / 2 }}" x2="{{ c.w }}" y2="{{ c.h / 2 }}"/>
+      <line class="grid" x1="0" y1="{{ c.h / 2 }}" x2="{{ c.w }}" y2="{{ c.h / 2 }}"/>
       <rect class="frame" x="0" y="0" width="{{ c.w }}" height="{{ c.h }}"/>
       <path class="line ink" d="{{ c.cross }}"/>
       <path class="line grey" d="{{ c.radial }}"/>
-      <text x="-8" y="4" text-anchor="end">+{{ c.side }}</text>
-      <text x="-8" y="{{ c.h / 2 + 4 }}" text-anchor="end">0</text>
-      <text x="-8" y="{{ c.h + 4 }}" text-anchor="end">−{{ c.side }}</text>
+      <text x="-8" y="4" text-anchor="end">{{ c.side }}</text>
+      <text x="-8" y="{{ c.h / 2 + 4 }}" text-anchor="end">{{ c.side_mid }}</text>
+      <text x="-8" y="{{ c.h + 4 }}" text-anchor="end">0</text>
       <text x="0" y="{{ c.h + 18 }}">{{ live.oem_start }}</text>
       <text x="{{ c.w }}" y="{{ c.h + 18 }}" text-anchor="end">{{ live.oem_end }}</text>
     </svg>
