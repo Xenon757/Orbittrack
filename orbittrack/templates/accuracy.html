@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block title %}Accuracy check · OrbitTrack{% endblock %}
+
+{% block extra_styles %}
+    .crumbs { margin-top: calc(var(--grid) * 4); font-size: 0.875rem; }
+    .crumbs a { font-weight: 600; }
+    .headline { display: grid; grid-template-columns: repeat(12, 1fr); gap: 0 24px; align-items: end; }
+    .headline .big { grid-column: span 6; }
+    .headline .big .v { font-weight: 800; font-stretch: 75%; line-height: 0.9; letter-spacing: -0.02em;
+      font-size: clamp(3.25rem, 8vw, 6rem); color: var(--signal); margin: 6px 0 10px; white-space: nowrap; }
+    .headline .big .v small { font-size: 0.4em; letter-spacing: 0; margin-left: 0.15em; }
+    .headline .big p { margin: 0; max-width: 48ch; text-wrap: pretty; }
+    .headline dl { grid-column: span 6; margin: 0; display: grid; grid-template-columns: 1fr auto; border-top: 2px solid var(--ink); }
+    .headline dt, .headline dd { margin: 0; padding: 9px 0; border-bottom: 1px solid var(--rule); }
+    .headline dd { text-align: right; font-weight: 700; }
+    .chart { width: 100%; height: auto; display: block; overflow: visible; margin-top: calc(var(--grid) * 4); }
+    .chart .frame { fill: none; stroke: var(--ink); stroke-width: 1; }
+    .chart .grid { stroke: var(--rule); stroke-width: 1; }
+    .chart .zero { stroke: var(--ink); stroke-width: 1; }
+    .chart .line { fill: none; stroke: var(--signal); stroke-width: 2.5; }
+    .chart .line.ink { stroke: var(--ink); stroke-width: 1.75; }
+    .chart .line.grey { stroke: var(--graphite); stroke-width: 1.75; stroke-dasharray: 5 3; }
+    .chart .measured { fill: var(--signal); stroke: var(--paper); stroke-width: 2; }
+    .chart text { font-family: var(--sans); fill: var(--graphite); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; }
+    .chart .title { fill: var(--ink); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; font-size: 10px; }
+    .chart .key { fill: var(--ink); }
+    .unavailable { border-top: 3px solid var(--signal); padding-top: 12px; max-width: 70ch; }
+    .reading { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 48px; }
+    .reading p { margin: 0 0 16px; max-width: 62ch; text-wrap: pretty; }
+    .reading strong { font-weight: 700; }
+    @media (max-width: 900px) {
+      .headline .big, .headline dl { grid-column: 1 / -1; }
+      .headline dl { margin-top: calc(var(--grid) * 3); }
+      .reading { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) { .chart text { font-size: 19px; } .chart .title { font-size: 17px; } }
+{% endblock %}
+
+{% block masthead %}
+  <header class="masthead">
+    <h1 class="wordmark">Orbit<span>/</span>Track</h1>
+    <dl class="masthead-meta">
+      <dt class="label">Function</dt><dd>Accuracy check of the pass predictions</dd>
+      <dt class="label">Satellite</dt><dd>ISS (ZARYA) · NORAD 25544</dd>
+      <dt class="label">Reference</dt><dd>NASA JSC trajectory operations ephemeris</dd>
+      <dt class="label">Method</dt><dd>SGP4 on CelesTrak TLEs vs NASA, every 4 min</dd>
+    </dl>
+  </header>
+{% endblock %}
+
+{% block content %}
+  <nav class="crumbs"><a href="/">← Pass predictions</a></nav>
+
+  <section class="section" aria-labelledby="s-live">
+    <h2 class="bar" id="s-live"><span class="no">01</span> Live check <span class="aside">Today's TLE vs NASA's latest ephemeris</span></h2>
+    {% if live %}
+    <div class="headline">
+      <div class="big">
+        <div class="label">Difference from NASA's position</div>
+        <div class="v">{{ live.start_km }}<small>km</small></div>
+        <p>At the start of NASA's ephemeris ({{ live.oem_start }}), where NASA's position comes from recent tracking,
+          our SGP4 prediction from the current TLE ({{ live.tle_age }}) is {{ live.start_km }} km away:
+          {{ live.start_timing }} s early or late along the orbit.</p>
+      </div>
+      <dl>
+        <dt>Current TLE epoch</dt><dd class="mono">{{ live.tle_epoch }}</dd>
+        <dt>NASA ephemeris</dt><dd class="mono">{{ live.oem_count }} vectors</dd>
+        <dt>Along-track share, full file</dt><dd>{{ live.along_share }}</dd>
+        <dt>Largest cross-track / radial</dt><dd>{{ live.max_cross }} / {{ live.max_radial }} km</dd>
+      </dl>
+    </div>
+
+    {% set c = live.chart %}
+    <svg class="chart" viewBox="-48 -26 {{ c.w + 64 }} {{ c.h + 50 }}" role="img"
+         aria-label="Distance between SGP4 and NASA's forecast over {{ c.days }} days, starting at {{ live.start_km }} km">
+      <text class="title" x="0" y="-10">Distance from NASA's trajectory · km</text>
+      <line class="grid" x1="0" y1="{{ c.h / 2 }}" x2="{{ c.w }}" y2="{{ c.h / 2 }}"/>
+      <rect class="frame" x="0" y="0" width="{{ c.w }}" height="{{ c.h }}"/>
+      <path class="line" d="{{ c.total }}"/>
+      <circle class="measured" cx="0" cy="{{ c.h }}" r="5"/>
+      <text x="-8" y="4" text-anchor="end">{{ c.total_top }}</text>
+      <text x="-8" y="{{ c.h / 2 + 4 }}" text-anchor="end">{{ (c.total_top | float / 2) | round(1) }}</text>
+      <text x="-8" y="{{ c.h + 4 }}" text-anchor="end">0</text>
+      <text x="0" y="{{ c.h + 18 }}">Measured (tracking)</text>
+      <text x="{{ c.w }}" y="{{ c.h + 18 }}" text-anchor="end">+{{ c.days }} days · vs NASA's forecast</text>
+    </svg>
+    <svg class="chart" viewBox="-48 -26 {{ c.w + 64 }} {{ c.h + 50 }}" role="img"
+         aria-label="Cross-track and radial components stay within {{ c.side }} km">
+      <text class="title" x="0" y="-10">Cross-track &amp; radial · km</text>
+      <text class="key" x="{{ c.w }}" y="-10" text-anchor="end">— cross-track   - - radial</text>
+      <line class="zero" x1="0" y1="{{ c.h / 2 }}" x2="{{ c.w }}" y2="{{ c.h / 2 }}"/>
+      <rect class="frame" x="0" y="0" width="{{ c.w }}" height="{{ c.h }}"/>
+      <path class="line ink" d="{{ c.cross }}"/>
+      <path class="line grey" d="{{ c.radial }}"/>
+      <text x="-8" y="4" text-anchor="end">+{{ c.side }}</text>
+      <text x="-8" y="{{ c.h / 2 + 4 }}" text-anchor="end">0</text>
+      <text x="-8" y="{{ c.h + 4 }}" text-anchor="end">−{{ c.side }}</text>
+      <text x="0" y="{{ c.h + 18 }}">{{ live.oem_start }}</text>
+      <text x="{{ c.w }}" y="{{ c.h + 18 }}" text-anchor="end">{{ live.oem_end }}</text>
+    </svg>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Day</th><th>UTC</th><th class="num">Total km</th><th class="num">Along-track</th>
+          <th class="num">Cross-track</th><th class="num">Radial</th><th class="num">Timing s</th>
+        </tr></thead>
+        <tbody>
+        {% for row in live.rows %}
+          <tr><td>{% if row.day == 0 %}Start{% else %}+{{ row.day }}{% endif %}</td><td>{{ row.time }}</td>
+            <td class="num">{{ row.total }}</td><td class="num">{{ row.along }}</td><td class="num">{{ row.cross }}</td>
+            <td class="num">{{ row.radial }}</td><td class="num">{{ row.timing }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="note">SGP4 minus NASA. Along-track + means our prediction is ahead of NASA's. Only the first row is a
+      measurement; later rows compare against NASA's forecast.</p>
+    {% else %}
+    <p class="unavailable">The live check is unavailable right now: {{ error }}. The recorded study below still applies.</p>
+    {% endif %}
+  </section>
+
+  <section class="section" aria-labelledby="s-study">
+    <h2 class="bar" id="s-study"><span class="no">02</span> Recorded study <span class="aside">NASA ephemeris of 21 Oct 2026</span></h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>TLE epoch</th><th class="num">Age at NASA's start</th><th class="num">Difference at start</th>
+          <th class="num">+7 days</th><th class="num">+14 days</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>21 Oct 2026 01:09 UTC</td><td class="num">0.45 days</td><td class="num">0.98 km (+0.12 s)</td>
+            <td class="num">15.5 km</td><td class="num">97.0 km</td></tr>
+          <tr><td>18 Oct 2026 11:13 UTC</td><td class="num">3.03 days</td><td class="num">0.80 km (−0.09 s)</td>
+            <td class="num">46.2 km</td><td class="num">113.5 km</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">Both TLEs were within 1 km of NASA's tracking-based position. Over the 15-day file, 99.9% of the
+      difference was along-track; cross-track peaked at 3.7 km and radial at 1.7 km. Two TLEs against one ephemeris:
+      a spot check, not a statistical study.</p>
+  </section>
+
+  <section class="section" aria-labelledby="s-reading">
+    <h2 class="bar" id="s-reading"><span class="no">03</span> How to read this</h2>
+    <div class="reading">
+      <div>
+        <p><strong>The reference.</strong> NASA's Johnson Space Center trajectory office publishes the ISS's position
+          and velocity every 4 minutes for about 15 days (CCSDS Orbit Ephemeris Message, EME2000 frame). It's built
+          from tracking and high-fidelity force models.</p>
+        <p><strong>What's a measurement.</strong> At the start of NASA's file the position comes from recent tracking,
+          so the difference there is a real measure of the TLE's error.</p>
+      </div>
+      <div>
+        <p><strong>What's a forecast.</strong> Later points are NASA's prediction, so the growing distance is two models
+          disagreeing, mostly about future atmospheric drag. It includes NASA's own forecast uncertainty.</p>
+        <p><strong>Why along-track.</strong> The ISS ends up in the right place on its orbit, just early or late, because
+          drag is what a TLE models least well. That's why pass times are shown to the second but drift if the TLE is old.</p>
+      </div>
+    </div>
+  </section>
+{% endblock %}
